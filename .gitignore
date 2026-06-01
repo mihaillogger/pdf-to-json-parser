@@ -1,0 +1,7 @@
+data/
+.venv/
+.ruff_cache/
+__pycache__/
+*.log
+images/
+*.json
