@@ -1,0 +1,95 @@
+import sys
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from loguru import logger
+
+# Создаем приложение Typer
+app = typer.Typer(
+    help="Конвейер для парсинга научных PDF-статей в структурированный JSON.",
+    add_completion=False,
+)
+
+
+@app.command()
+def process(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            help="Путь к PDF-файлу или директории с PDF-документами",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="Директория для сохранения итоговых JSON и изображений",
+        ),
+    ],
+    workers: Annotated[
+        int,
+        typer.Option("--workers", help="Количество параллельных процессов"),
+    ] = 1,
+    overwrite: Annotated[
+        bool,
+        typer.Option("--overwrite", help="Перезаписывать существующие JSON-файлы"),
+    ] = False,
+    log_level: Annotated[
+        str,
+        typer.Option("--log-level", help="Уровень логирования (INFO, DEBUG)"),
+    ] = "INFO",
+    extract_images: Annotated[
+        bool,
+        typer.Option("--extract-images", help="Сохранять изображения фигур"),
+    ] = True,
+) -> None:
+    """
+    Главная точка входа. Валидирует пути и передает управление в ядро
+    парсера (pipeline.py).
+    """
+    # 1. Жесткая настройка логгера по ТЗ
+    # 1. Жесткая настройка логгера по ТЗ
+    logger.remove()
+    log_format = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level: <8}</level> | {message}"
+    )
+    logger.add(sys.stdout, level=log_level.upper(), format=log_format)
+
+    # Создаем выходную папку и вешаем туда запись полных трейсов
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(output_dir / "run.log", level="DEBUG", rotation="10 MB")
+
+    logger.info(f"Запуск парсера. Вход: {input_path}")
+    logger.info(
+        f"Параметры: workers={workers}, overwrite={overwrite}, "
+        f"extract_images={extract_images}"
+    )
+
+    # 2. Валидация входных данных
+    if not input_path.exists():
+        logger.error(f"Указанный путь не существует: {input_path}")
+        raise typer.Exit(code=1)
+
+    # 3. Маршрутизация в ядро
+    if input_path.is_file() and input_path.suffix.lower() == ".pdf":
+        logger.info("Режим: Одиночный документ")
+        # Вызов process_single_file(input_path, output_dir, overwrite, extract_images)
+        logger.warning("TODO: Здесь будет вызов process_single_file из pipeline.py")
+
+    elif input_path.is_dir():
+        logger.info("Режим: Пакетная обработка директории")
+        # Вызов process_directory(input_path, output_dir, workers, ...)
+        logger.warning("TODO: Здесь будет вызов process_directory из pipeline.py")
+
+    else:
+        logger.error("Указанный путь не является PDF-файлом или директорией.")
+        raise typer.Exit(code=1)
+
+    logger.info("Отработка интерфейса завершена.")
+
+
+if __name__ == "__main__":
+    app()
