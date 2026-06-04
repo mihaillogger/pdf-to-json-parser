@@ -21,6 +21,9 @@ class BaseSchema(BaseModel):
     def clean_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for key, value in data.items():
+                if key in ("latex", "raw_text", "content"):
+                    continue
+                
                 if isinstance(value, str):
                     data[key] = clean_text(value)
         return data
