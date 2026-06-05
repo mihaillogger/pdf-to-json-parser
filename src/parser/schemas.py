@@ -25,14 +25,17 @@ def clean_text(text: str | None) -> str | None:
 
 
 class BaseSchema(BaseModel):
-    """Базовый класс с автоматической очисткой строковых полей."""
+    """Базовый класс с точечной автоматической очисткой строковых полей."""
 
     @model_validator(mode="before")
     @classmethod
     def clean_strings(cls, data: Any) -> Any:
+        # Поля, в которых строжайше запрещено трогать переносы строк \n
+        PROTECTED_FIELDS = {"content", "latex", "raw_text"}
+
         if isinstance(data, dict):
             for key, value in data.items():
-                if isinstance(value, str):
+                if isinstance(value, str) and key not in PROTECTED_FIELDS:
                     data[key] = clean_text(value)
         return data
 
@@ -47,12 +50,15 @@ class BBox(BaseSchema):
 
 
 class PageBlock(BaseSchema):
-    text: str = Field(..., description="Очищенный текст блока")
-    font_size: float = Field(
-        ..., description="Максимальный размер шрифта в блоке"
+    text: str | None = Field(
+        None, description="Текст блока (null для картинок)"
     )
-    bbox: BBox = Field(..., description="Координаты блока на странице")
+    font_size: float | None = Field(
+        None, description="Размер шрифта (null для картинок)"
+    )
+    bbox: BBox = Field(..., description="Координаты блока")
     page_number: int = Field(..., description="Номер страницы")
+    block_type: str = Field(..., description="Тип блока: 'text' или 'image'")
 
 
 class Metadata(BaseSchema):
@@ -114,7 +120,7 @@ class Figure(BaseSchema):
 
 class Table(BaseSchema):
     id: str = Field(..., description="Идентификатор таблицы")
-    caption: str = Field(..., description="Подпись к таблици")
+    caption: str = Field(..., description="Подпись к таблице")
     page: int = Field(..., description="Номер страницы")
     bbox: BBox = Field(..., description="Координаты таблицы")
     img_path: str = Field(..., description="Путь к изображению")
