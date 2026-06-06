@@ -9,10 +9,13 @@ logger = logging.getLogger(__name__)
 
 
 class PDFExtractor:
+    """Извлекает текстовые и графические блоки из PDF-документа
+        с учетом колонок и зонирования."""
+
     def __init__(
         self,
         pdf_path: str,
-        col_tolerance: float = 5.0,
+        col_tolerance: float = 2.0,
         block_tolerance: float = 10.0,
         spanning_threshold: float = 0.7,
     ):
@@ -29,17 +32,29 @@ class PDFExtractor:
                 for page_num in range(len(doc)):
                     page = doc[page_num]
                     page_width = page.rect.width
+                    page_height = page.rect.height
                     raw_blocks = page.get_text("dict").get("blocks", [])
 
-                    valid_blocks = [
-                        b for b in raw_blocks if b.get("type") in (0, 1)
-                    ]
+                    valid_blocks: List[Dict[str, Any]] = []
+
+                    for b in raw_blocks:
+                        b_type = b.get("type")
+                        if b_type not in (0, 1):
+                            continue
+
+                        x0, y0, x1, y1 = b["bbox"]
+
+                        if b_type == 0:
+                            if y0 < 50 or y1 > (page_height - 50):
+                                continue
+
+                        valid_blocks.append(b)
+
                     if not valid_blocks:
                         continue
 
                     valid_blocks.sort(key=lambda x: x["bbox"][1])
 
-                    # --- ЭТАП 1: ГОРИЗОНТАЛЬНОЕ ЗОНИРОВАНИЕ ---
                     zones: List[List[Dict[str, Any]]] = []
                     current_zone: List[Dict[str, Any]] = []
 
@@ -53,7 +68,6 @@ class PDFExtractor:
                             if current_zone:
                                 zones.append(current_zone)
                                 current_zone = []
-                            # Сквозной блок живет в своей отдельной зоне
                             zones.append([b])
                         else:
                             current_zone.append(b)
@@ -61,7 +75,6 @@ class PDFExtractor:
                     if current_zone:
                         zones.append(current_zone)
 
-                    # --- ЭТАП 2: РАЗБОР КОЛОНОК ВНУТРИ ЗОН ---
                     for zone in zones:
                         if len(zone) == 1:
                             z_bbox = zone[0]["bbox"]
@@ -122,12 +135,9 @@ class PDFExtractor:
     def _process_block(
         self, b: Dict[str, Any], page_num: int
     ) -> List[PageBlock]:
-        """
-        Умная обработка одного блока: отделяет картинки
-        и дробит текст при смене шрифта.
-        """
         block_type = b.get("type")
 
+        # Отделяем картинки, ставим is_bold=False по умолчанию
         if block_type == 1:
             x0, y0, x1, y1 = b["bbox"]
             return [
@@ -137,12 +147,14 @@ class PDFExtractor:
                     bbox=BBox(left=x0, top=y0, right=x1, bottom=y1),
                     page_number=page_num + 1,
                     block_type="image",
+                    is_bold=False,
                 )
             ]
 
         results: List[PageBlock] = []
         current_text: List[str] = []
         current_font: Optional[float] = None
+        current_bold: Optional[bool] = None
         current_bbox: Optional[List[float]] = None
 
         for line in b.get("lines", []):
@@ -150,21 +162,41 @@ class PDFExtractor:
             if not spans:
                 continue
 
-            line_text = "".join([s["text"] for s in spans])
-            line_font = max([s["size"] for s in spans])
+            line_text = ""
+            prev_x1: Optional[float] = None
+            span_fonts: List[float] = []
+
+            for s in spans:
+                # Фикс пробелов по оси X (не даем ревьюеру его отменить)
+                if prev_x1 is not None and (s["bbox"][0] - prev_x1) > 4.0:
+                    line_text += " "
+                line_text += s["text"]
+                prev_x1 = s["bbox"][2]
+                span_fonts.append(s["size"])
+
+            line_font = max(span_fonts) if span_fonts else 0.0
+
+            # Извлекаем жирность строго по логике ревьюера
+            line_bold = any(
+                bool(s.get("flags", 0) & 16) or ("bold" in s.get("font", "").lower())
+                for s in spans
+            )
             line_bbox = list(line["bbox"])
 
-            # Явная проверка на None гарантирует Mypy, что переменные инициализированы
-            if current_font is None or current_bbox is None:
+            if current_font is None or current_bbox is None or current_bold is None:
                 current_font = line_font
+                current_bold = line_bold
                 current_bbox = line_bbox
                 current_text.append(line_text)
-            elif abs(current_font - line_font) > 1.0:
+            # Жесткое правило: режем блок при смене размера ИЛИ жирности
+            elif abs(current_font - line_font) > 1.0 or current_bold != line_bold:
                 new_block = self._create_text_pageblock(
-                    current_text, current_font, current_bbox, page_num
+                    current_text, current_font, current_bbox, page_num, current_bold
                 )
-                results.append(new_block)
+                if new_block:
+                    results.append(new_block)
                 current_font = line_font
+                current_bold = line_bold
                 current_bbox = line_bbox
                 current_text = [line_text]
             else:
@@ -178,11 +210,13 @@ class PDFExtractor:
             current_text
             and current_font is not None
             and current_bbox is not None
+            and current_bold is not None
         ):
             new_block = self._create_text_pageblock(
-                current_text, current_font, current_bbox, page_num
+                current_text, current_font, current_bbox, page_num, current_bold
             )
-            results.append(new_block)
+            if new_block:
+                results.append(new_block)
 
         return results
 
@@ -192,8 +226,13 @@ class PDFExtractor:
         font: float,
         bbox: List[float],
         page_num: int,
-    ) -> PageBlock:
+        is_bold: bool,
+    ) -> Optional[PageBlock]:
         raw_text = "\n".join(text_lines).strip()
+
+        if len(raw_text) <= 3:
+            return None
+
         return PageBlock(
             text=raw_text,
             font_size=round(font, 1),
@@ -202,6 +241,7 @@ class PDFExtractor:
             ),
             page_number=page_num + 1,
             block_type="text",
+            is_bold=is_bold,
         )
 
 

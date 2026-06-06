@@ -48,18 +48,21 @@ class BBox(BaseSchema):
     right: float
     bottom: float
 
-
 class PageBlock(BaseSchema):
+    """Низкоуровневый блок контента, извлеченный со страницы PDF."""
+
     text: str | None = Field(
-        None, description="Текст блока (null для картинок)"
+        None, description="Текст блока (null, если это картинка)"
     )
     font_size: float | None = Field(
-        None, description="Размер шрифта (null для картинок)"
+        None, description="Максимальный размер шрифта в блоке (null для картинок)"
     )
-    bbox: BBox = Field(..., description="Координаты блока")
-    page_number: int = Field(..., description="Номер страницы")
-    block_type: str = Field(..., description="Тип блока: 'text' или 'image'")
-
+    bbox: BBox = Field(..., description="Координаты границ блока")
+    page_number: int = Field(..., description="Номер страницы (начиная с 1)")
+    block_type: str = Field(..., description="Тип контента: 'text' или 'image'")
+    is_bold: bool = Field(
+        False, description="Признак жирного шрифта (для выделения заголовков)"
+    )
 
 class Metadata(BaseSchema):
     title: str = Field(..., description="Полное название статьи")
