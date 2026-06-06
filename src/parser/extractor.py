@@ -1,11 +1,9 @@
-import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import fitz  # type: ignore
+from loguru import logger
 
 from parser.schemas import BBox, PageBlock
-
-logger = logging.getLogger(__name__)
 
 
 class PDFExtractor:
@@ -24,8 +22,8 @@ class PDFExtractor:
         self.block_tolerance = block_tolerance
         self.spanning_threshold = spanning_threshold
 
-    def extract(self) -> List[PageBlock]:
-        extracted_blocks: List[PageBlock] = []
+    def extract(self) -> list[PageBlock]:
+        extracted_blocks: list[PageBlock] = []
 
         try:
             with fitz.open(self.pdf_path) as doc:
@@ -35,7 +33,7 @@ class PDFExtractor:
                     page_height = page.rect.height
                     raw_blocks = page.get_text("dict").get("blocks", [])
 
-                    valid_blocks: List[Dict[str, Any]] = []
+                    valid_blocks: list[dict[str, Any]] = []
 
                     for b in raw_blocks:
                         b_type = b.get("type")
@@ -55,8 +53,8 @@ class PDFExtractor:
 
                     valid_blocks.sort(key=lambda x: x["bbox"][1])
 
-                    zones: List[List[Dict[str, Any]]] = []
-                    current_zone: List[Dict[str, Any]] = []
+                    zones: list[list[dict[str, Any]]] = []
+                    current_zone: list[dict[str, Any]] = []
 
                     for b in valid_blocks:
                         x0, y0, x1, y1 = b["bbox"]
@@ -107,7 +105,7 @@ class PDFExtractor:
                                     current_col = interval
                             columns_x.append(current_col)
 
-                        column_blocks: List[List[Dict[str, Any]]] = [
+                        column_blocks: list[list[dict[str, Any]]] = [
                             [] for _ in range(len(columns_x))
                         ]
                         for b in zone:
@@ -133,8 +131,8 @@ class PDFExtractor:
         return extracted_blocks
 
     def _process_block(
-        self, b: Dict[str, Any], page_num: int
-    ) -> List[PageBlock]:
+        self, b: dict[str, Any], page_num: int
+    ) -> list[PageBlock]:
         block_type = b.get("type")
 
         # Отделяем картинки, ставим is_bold=False по умолчанию
@@ -151,11 +149,11 @@ class PDFExtractor:
                 )
             ]
 
-        results: List[PageBlock] = []
-        current_text: List[str] = []
-        current_font: Optional[float] = None
-        current_bold: Optional[bool] = None
-        current_bbox: Optional[List[float]] = None
+        results: list[PageBlock] = []
+        current_text: list[str] = []
+        current_font: float | None = None
+        current_bold: bool | None = None
+        current_bbox: list[float] | None = None
 
         for line in b.get("lines", []):
             spans = line.get("spans", [])
@@ -163,11 +161,10 @@ class PDFExtractor:
                 continue
 
             line_text = ""
-            prev_x1: Optional[float] = None
-            span_fonts: List[float] = []
+            prev_x1: float | None = None
+            span_fonts: list[float] = []
 
             for s in spans:
-                # Фикс пробелов по оси X (не даем ревьюеру его отменить)
                 if prev_x1 is not None and (s["bbox"][0] - prev_x1) > 4.0:
                     line_text += " "
                 line_text += s["text"]
@@ -176,7 +173,6 @@ class PDFExtractor:
 
             line_font = max(span_fonts) if span_fonts else 0.0
 
-            # Извлекаем жирность строго по логике ревьюера
             line_bold = any(
                 bool(s.get("flags", 0) & 16) or ("bold" in s.get("font", "").lower())
                 for s in spans
@@ -188,7 +184,6 @@ class PDFExtractor:
                 current_bold = line_bold
                 current_bbox = line_bbox
                 current_text.append(line_text)
-            # Жесткое правило: режем блок при смене размера ИЛИ жирности
             elif abs(current_font - line_font) > 1.0 or current_bold != line_bold:
                 new_block = self._create_text_pageblock(
                     current_text, current_font, current_bbox, page_num, current_bold
@@ -222,12 +217,12 @@ class PDFExtractor:
 
     def _create_text_pageblock(
         self,
-        text_lines: List[str],
+        text_lines: list[str],
         font: float,
-        bbox: List[float],
+        bbox: list[float],
         page_num: int,
         is_bold: bool,
-    ) -> Optional[PageBlock]:
+    ) -> PageBlock | None:
         raw_text = "\n".join(text_lines).strip()
 
         if len(raw_text) <= 3:
@@ -245,5 +240,5 @@ class PDFExtractor:
         )
 
 
-def get_page_blocks(filepath: str) -> List[PageBlock]:
+def get_page_blocks(filepath: str) -> list[PageBlock]:
     return PDFExtractor(filepath).extract()
