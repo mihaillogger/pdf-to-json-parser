@@ -5,26 +5,37 @@ from pydantic import BaseModel, Field, model_validator
 
 
 def clean_text(text: str | None) -> str | None:
-    """Очищает текст от trailing whitespace и висячих переносов."""
+    """
+    Очищает текст от trailing whitespace, висячих переносов
+    и лишних разрывов строк.
+    """
     if not text:
         return text
-    # Склеиваем переносы слов: "поверхно-\nстный" -> "поверхностный"
+
+    # 1. Склеиваем переносы слов: "поверхно-\nстный" -> "поверхностный"
     cleaned = re.sub(r"-\s*\n\s*", "", text)
+
+    # 2. Заменяем одинарные переносы строк на пробелы (сохраняя \n\n)
+    cleaned = re.sub(r"(?<!\n)\n(?!\n)", " ", cleaned)
+
+    # 3. Схлопываем множественные пробелы в один
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+
     return cleaned.strip()
 
 
 class BaseSchema(BaseModel):
-    """Базовый класс с автоматической очисткой строковых полей."""
+    """Базовый класс с точечной автоматической очисткой строковых полей."""
 
     @model_validator(mode="before")
     @classmethod
     def clean_strings(cls, data: Any) -> Any:
+        # Поля, в которых строжайше запрещено трогать переносы строк \n
+        PROTECTED_FIELDS = {"content", "latex", "raw_text"}
+
         if isinstance(data, dict):
             for key, value in data.items():
-                if key in ("latex", "raw_text", "content"):
-                    continue
-
-                if isinstance(value, str):
+                if isinstance(value, str) and key not in PROTECTED_FIELDS:
                     data[key] = clean_text(value)
         return data
 
@@ -37,37 +48,40 @@ class BBox(BaseSchema):
     right: float
     bottom: float
 
-
 class PageBlock(BaseSchema):
-    """Низкоуровневый блок контента, извлеченный со страницы PDF.
+    """Низкоуровневый блок контента, извлеченный со страницы PDF."""
 
-    Используется как промежуточный формат для передачи сырых данных
-    от I/O экстрактора в алгоритмы сборки секций и фигур.
-    """
-
-    text: str | None = Field(None, description="Текст блока (null, если это картинка)")
+    text: str | None = Field(
+        None, description="Текст блока (null, если это картинка)"
+    )
     font_size: float | None = Field(
         None, description="Максимальный размер шрифта в блоке (null для картинок)"
     )
     bbox: BBox = Field(..., description="Координаты границ блока")
     page_number: int = Field(..., description="Номер страницы (начиная с 1)")
     block_type: str = Field(..., description="Тип контента: 'text' или 'image'")
-    is_bold: bool = Field(False, description="Признак жирного шрифта (для заголовков)")
-
-
-# 4.2. Объект metadata
-
+    is_bold: bool = Field(
+        False, description="Признак жирного шрифта (для выделения заголовков)"
+    )
 
 class Metadata(BaseSchema):
     title: str = Field(..., description="Полное название статьи")
-    title_en: str | None = Field(None, description="Перевод названия на английский")
-    authors: list[str] = Field(default_factory=list, description="Список авторов")
-    abstract: str | None = Field(
-        ..., description="Аннотация статьи (обязательное поле, допускает null)"
+    title_en: str | None = Field(
+        None, description="Перевод названия на английский"
     )
-    keywords: list[str] = Field(default_factory=list, description="Ключевые слова")
+    authors: list[str] = Field(
+        default_factory=list, description="Список авторов"
+    )
+    abstract: str | None = Field(
+        ...,
+        description="Аннотация статьи (обязательное поле, допускает null)",
+    )
+    keywords: list[str] = Field(
+        default_factory=list, description="Ключевые слова"
+    )
     doi: str | None = Field(
-        ..., description="DOI документа (обязательное поле, допускает null)"
+        ...,
+        description="DOI документа (обязательное поле, допускает null)",
     )
     journal: str | None = Field(None, description="Название журнала")
     year: int | None = Field(None, description="Год публикации")
@@ -79,9 +93,6 @@ class Metadata(BaseSchema):
     )
 
 
-# 4.3. Объект Section (Рекурсивный)
-
-
 class Section(BaseSchema):
     heading: str = Field(..., description="Заголовок секции")
     level: int = Field(..., description="Уровень иерархии")
@@ -90,13 +101,6 @@ class Section(BaseSchema):
         default_factory=list, description="Вложенные секции"
     )
     number: str | None = Field(None, description="Номер секции")
-    status: str | None = Field(None, description="Статус")
-    status_effective_from: str | None = Field(
-        None, description="Дата вступления статуса"
-    )
-
-
-# 4.4. Объект Figure и Panel
 
 
 class Panel(BaseSchema):
@@ -112,22 +116,20 @@ class Figure(BaseSchema):
     page: int = Field(..., description="Номер страницы")
     bbox: BBox = Field(..., description="Координаты фигуры")
     img_path: str = Field(..., description="Путь к изображению")
-    panels: list[Panel] = Field(default_factory=list, description="Массив подпанелей")
-
-
-# 4.5. Объект Table
+    panels: list[Panel] = Field(
+        default_factory=list, description="Массив подпанелей"
+    )
 
 
 class Table(BaseSchema):
-    id: str
-    caption: str
-    page: int
-    bbox: BBox
-    img_path: str
-    data: list[list[str]] = Field(default_factory=list, description="Табличные данные")
-
-
-# 4.6. Объект Equation
+    id: str = Field(..., description="Идентификатор таблицы")
+    caption: str = Field(..., description="Подпись к таблице")
+    page: int = Field(..., description="Номер страницы")
+    bbox: BBox = Field(..., description="Координаты таблицы")
+    img_path: str = Field(..., description="Путь к изображению")
+    data: list[list[str]] = Field(
+        default_factory=list, description="Табличные данные"
+    )
 
 
 class Equation(BaseSchema):
@@ -138,16 +140,17 @@ class Equation(BaseSchema):
     bbox: BBox | None = Field(None, description="Координаты уравнения")
 
 
-# 4.1. Корневая структура
-
-
 class Document(BaseSchema):
     metadata: Metadata = Field(..., description="Метаданные документа")
-    sections: list[Section] = Field(default_factory=list, description="Иерархия секций")
+    sections: list[Section] = Field(
+        default_factory=list, description="Иерархия секций"
+    )
     figures: list[Figure] = Field(
         default_factory=list, description="Извлечённые фигуры"
     )
-    tables: list[Table] = Field(default_factory=list, description="Извлечённые таблицы")
+    tables: list[Table] = Field(
+        default_factory=list, description="Извлечённые таблицы"
+    )
     equations: list[Equation] = Field(
         default_factory=list, description="Уравнения в формате LaTeX"
     )
