@@ -11,6 +11,17 @@ dependencies = [
     "pymupdf>=1.23.0",
     "pdfplumber>=0.10.0",
     "loguru>=0.7.2",
+    "pandas>=2.3.3",
+    "camelot-py>=1.0.9",
+    "opencv-python>=4.13.0.92",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.9",
+    "ultralytics>=8.4.60",
+    "huggingface-hub>=1.17.0",
+    "doclayout-yolo>=0.0.4",
+    "ollama>=0.6.2",
+    "paddlepaddle>=3.3.1",
+    "paddleocr>=3.6.0",
 ]
 
 [dependency-groups]
