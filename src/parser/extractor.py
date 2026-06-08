@@ -8,7 +8,7 @@ from parser.schemas import BBox, PageBlock
 
 class PDFExtractor:
     """Извлекает текстовые и графические блоки из PDF-документа
-        с учетом колонок и зонирования."""
+    с учетом колонок и зонирования."""
 
     def __init__(
         self,
@@ -58,9 +58,7 @@ class PDFExtractor:
 
                     for b in valid_blocks:
                         x0, y0, x1, y1 = b["bbox"]
-                        is_spanning = (x1 - x0) > (
-                            page_width * self.spanning_threshold
-                        )
+                        is_spanning = (x1 - x0) > (page_width * self.spanning_threshold)
 
                         if is_spanning:
                             if current_zone:
@@ -93,13 +91,8 @@ class PDFExtractor:
                         if x_intervals:
                             current_col = x_intervals[0]
                             for interval in x_intervals[1:]:
-                                if (
-                                    interval[0]
-                                    <= current_col[1] + self.col_tolerance
-                                ):
-                                    current_col[1] = max(
-                                        current_col[1], interval[1]
-                                    )
+                                if interval[0] <= current_col[1] + self.col_tolerance:
+                                    current_col[1] = max(current_col[1], interval[1])
                                 else:
                                     columns_x.append(current_col)
                                     current_col = interval
@@ -130,9 +123,7 @@ class PDFExtractor:
 
         return extracted_blocks
 
-    def _process_block(
-        self, b: dict[str, Any], page_num: int
-    ) -> list[PageBlock]:
+    def _process_block(self, b: dict[str, Any], page_num: int) -> list[PageBlock]:
         block_type = b.get("type")
 
         # Отделяем картинки, ставим is_bold=False по умолчанию
@@ -231,9 +222,7 @@ class PDFExtractor:
         return PageBlock(
             text=raw_text,
             font_size=round(font, 1),
-            bbox=BBox(
-                left=bbox[0], top=bbox[1], right=bbox[2], bottom=bbox[3]
-            ),
+            bbox=BBox(left=bbox[0], top=bbox[1], right=bbox[2], bottom=bbox[3]),
             page_number=page_num + 1,
             block_type="text",
             is_bold=is_bold,

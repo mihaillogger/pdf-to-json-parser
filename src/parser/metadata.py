@@ -85,7 +85,7 @@ LLM_TIMEOUT = 60.0
 _LLM_SYSTEM_PROMPT = (
     "Ты извлекаешь метаданные из текста титульной страницы научной статьи. "
     "Верни СТРОГО JSON с ключами: "
-    'title (строка), '
+    "title (строка), "
     'authors (список строк в формате "Фамилия, Имя"), '
     "abstract (строка или null). "
     "Не добавляй пояснений и markdown."
@@ -145,9 +145,7 @@ def normalize_author(name: str) -> str:
 def _text_blocks(blocks: list[PageBlock], page: int) -> list[PageBlock]:
     """Текстовые блоки указанной страницы (без картинок и пустых, 1-индексация)."""
     return [
-        b
-        for b in blocks
-        if b.page_number == page and b.block_type == "text" and b.text
+        b for b in blocks if b.page_number == page and b.block_type == "text" and b.text
     ]
 
 
@@ -297,8 +295,7 @@ def query_crossref(doi: str) -> dict[str, Any] | None:
         Объект ``message`` из ответа CrossRef либо ``None``.
     """
     user_agent = (
-        "pdf-to-json-parser/0.1 "
-        "(https://github.com/mihaillogger/pdf-to-json-parser)"
+        "pdf-to-json-parser/0.1 (https://github.com/mihaillogger/pdf-to-json-parser)"
     )
     if CROSSREF_MAILTO:
         user_agent += f" mailto:{CROSSREF_MAILTO}"

@@ -343,9 +343,7 @@ def test_query_crossref_network_error_returns_none(monkeypatch: Any) -> None:
 
 
 def test_extract_metadata_online_uses_crossref(monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        metadata, "query_crossref", lambda doi: SAMPLE_CROSSREF_MESSAGE
-    )
+    monkeypatch.setattr(metadata, "query_crossref", lambda doi: SAMPLE_CROSSREF_MESSAGE)
     blocks = [_block("heuristic title to be overridden", 18.0, top=40.0)]
     raw_text = "see DOI 10.1016/j.ces.2025.121219"
 

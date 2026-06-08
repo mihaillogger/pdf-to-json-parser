@@ -4,16 +4,16 @@
 и автоматическое перемещение финальных весов в корневую директорию проекта.
 """
 
+import logging
 import os
 import shutil
-import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 from roboflow import Roboflow
 from ultralytics import YOLO
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +28,7 @@ def main() -> None:
     root_dir = Path(__file__).resolve().parent.parent
     weights_dir = root_dir / "weights"
     weights_dir.mkdir(exist_ok=True)
-    
+
     final_model_path = weights_dir / "best.pt"
 
     load_dotenv()
@@ -44,21 +44,17 @@ def main() -> None:
 
     logger.info("Датасет загружен. Запуск обучения YOLOv8n.")
     model = YOLO("yolov8n.pt")
-    
+
     model.train(
-        data=f"{dataset.location}/data.yaml",
-        epochs=50,
-        imgsz=1024,
-        batch=8,
-        device=0
+        data=f"{dataset.location}/data.yaml", epochs=50, imgsz=1024, batch=8, device=0
     )
-    
+
     yolo_save_dir = Path(model.trainer.save_dir)
     generated_weights_path = yolo_save_dir / "weights" / "best.pt"
-    
+
     if not generated_weights_path.exists():
         raise FileNotFoundError(f"Файл весов не сгенерирован: {generated_weights_path}")
-        
+
     shutil.copy(generated_weights_path, final_model_path)
     logger.info("Обучение завершено. Веса сохранены: %s", final_model_path)
 

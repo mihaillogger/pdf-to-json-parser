@@ -59,9 +59,7 @@ class PageBlock(BaseSchema):
     от I/O экстрактора в алгоритмы сборки секций и фигур.
     """
 
-    text: str | None = Field(
-        None, description="Текст блока (null, если это картинка)"
-    )
+    text: str | None = Field(None, description="Текст блока (null, если это картинка)")
     font_size: float | None = Field(
         None, description="Максимальный размер шрифта в блоке (null для картинок)"
     )
@@ -174,4 +172,3 @@ class Document(BaseSchema):
         None, description="Текст раздела Acknowledgements или null"
     )
     raw_text: str = Field(..., description="Полный текст документа")
-    

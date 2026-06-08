@@ -10,6 +10,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
+
 @app.command()
 def process(
     input_path: Annotated[
@@ -49,10 +50,7 @@ def process(
         bool,
         typer.Option(
             "--offline",
-            help=(
-                "Отключить все сетевые запросы "
-                "(принудительный локальный режим)"
-            ),
+            help=("Отключить все сетевые запросы (принудительный локальный режим)"),
         ),
     ] = False,
     use_crossref: Annotated[
