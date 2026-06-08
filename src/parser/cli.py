@@ -5,6 +5,8 @@ from typing import Annotated
 import typer
 from loguru import logger
 
+from parser import pipeline
+
 app = typer.Typer(
     help="Конвейер для парсинга научных PDF-статей в структурированный JSON.",
     add_completion=False,
@@ -98,18 +100,27 @@ def process(
 
     if input_path.is_file() and input_path.suffix.lower() == ".pdf":
         logger.info("Режим: Одиночный документ")
-        logger.warning(
-            "TODO: Здесь будет вызов process_single_file из pipeline.py "
-            f"с флагами: offline={offline}, crossref={use_crossref}, "
-            f"llm={use_llm}"
+        pipeline.process_single_file(
+            pdf_path=input_path,
+            output_dir=output_dir,
+            overwrite=overwrite,
+            offline=offline,
+            use_crossref=use_crossref,
+            use_llm=use_llm,
+            extract_images=extract_images,
         )
 
     elif input_path.is_dir():
         logger.info("Режим: Пакетная обработка директории")
-        logger.warning(
-            "TODO: Здесь будет вызов process_directory из pipeline.py "
-            f"с флагами: offline={offline}, crossref={use_crossref}, "
-            f"llm={use_llm}"
+        pipeline.process_directory(
+            input_dir=input_path,
+            output_dir=output_dir,
+            workers=workers,
+            overwrite=overwrite,
+            offline=offline,
+            use_crossref=use_crossref,
+            use_llm=use_llm,
+            extract_images=extract_images,
         )
 
     else:
