@@ -11,6 +11,39 @@ from parser.schemas import Document
 from parser.sections import build_section_tree
 
 
+def enrich_equations_context(equations: list, blocks: list) -> None:
+    """
+    Обогащает уравнения контекстом. Сопоставляет Y-координаты 
+    ограничивающих рамок (BBox) формул и текстовых блоков Матвея.
+    """
+    for eq in equations:
+        if not eq.bbox or not eq.page:
+            continue
+
+        page_blocks = [
+            b for b in blocks
+            if b.page_number == eq.page and getattr(b, "block_type", "text") == "text" and b.text
+        ]
+        
+        if not page_blocks:
+            continue
+
+        above = [b for b in page_blocks if b.bbox.bottom <= eq.bbox.top + 10]
+        below = [b for b in page_blocks if b.bbox.top >= eq.bbox.bottom - 10]
+
+        context_parts = []
+        if above:
+            nearest_above = max(above, key=lambda b: b.bbox.bottom)
+            context_parts.append(nearest_above.text.strip())
+        
+        if below:
+            nearest_below = min(below, key=lambda b: b.bbox.top)
+            context_parts.append(nearest_below.text.strip())
+
+        if context_parts:
+            eq.context = "\n[FORMULA PLACEHOLDER]\n".join(context_parts)
+
+
 def process_single_file(
     pdf_path: Path,
     output_dir: Path,
@@ -70,19 +103,24 @@ def process_single_file(
             spatial = SpatialExtractor(output_img_dir=str(img_dir))
             figures_list, tables_list = spatial.extract_visuals(str(pdf_path))
 
-        # 5. Уравнения
+        # 5. Уравнения (Твоя YOLOv8 + Pix2Tex)
         equations_list = []
-
         project_root = Path(__file__).resolve().parent.parent.parent
         eq_weights = project_root / "weights" / "best.pt"
-
+        
         if eq_weights.exists():
             logger.debug("Запуск EquationExtractor...")
             eq_extractor = EquationExtractor(model_path=str(eq_weights))
             equations_list = eq_extractor.process_pdf(str(pdf_path))
+            
+            # === СТРОГАЯ ИНТЕГРАЦИЯ КОНТЕКСТА ===
+            logger.debug("Обогащение формул текстовым контекстом...")
+            enrich_equations_context(equations_list, blocks)
+            # ====================================
         else:
             logger.warning(
-                f"Веса для уравнений не найдены ({eq_weights}).Парсинг формул пропущен."
+                f"Веса для уравнений не найдены ({eq_weights}). "
+                "Парсинг формул пропущен."
             )
 
         # 6. Финальная Pydantic-сборка

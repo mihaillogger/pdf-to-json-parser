@@ -135,6 +135,11 @@ class Figure(BaseSchema):
 # 4.5. Объект Table
 
 
+class TableDataResponse(BaseModel):
+    """Вспомогательная схема для валидации JSON-ответа от VLM (LLaVA)."""
+    data: list[list[str]] = Field(..., description="Двумерный массив табличных данных")
+
+
 class Table(BaseSchema):
     id: str
     caption: str

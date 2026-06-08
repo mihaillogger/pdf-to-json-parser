@@ -1,11 +1,18 @@
 import sys
+import warnings
 from pathlib import Path
 from typing import Annotated
 
+import fitz  # Импортируем fitz сюда только ради отключения логов
 import typer
 from loguru import logger
 
+warnings.filterwarnings("ignore")
+
+fitz.TOOLS.mupdf_display_errors(False)
+
 from parser import pipeline
+
 
 app = typer.Typer(
     help="Конвейер для парсинга научных PDF-статей в структурированный JSON.",
