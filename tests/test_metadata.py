@@ -11,6 +11,7 @@ from parser.metadata import (
     extract_metadata,
     find_doi,
     guess_abstract,
+    guess_authors,
     guess_title,
     guess_year,
     normalize_author,
@@ -77,6 +78,13 @@ def test_normalize_author_single_token() -> None:
     assert normalize_author("Madonna") == "Madonna"
 
 
+def test_normalize_author_attached_affiliation_digits() -> None:
+    # Реальный кейс: цифры аффилиаций прилипают к фамилии без разделителя.
+    assert normalize_author("Serhad Tilki1,2") == "Tilki, Serhad"
+    assert normalize_author("Omur Celikbıcak3") == "Celikbıcak, Omur"
+    assert normalize_author("Mehmet Yakup Arica1,5") == "Arica, Mehmet Yakup"
+
+
 # --- guess_title ---
 
 
@@ -128,11 +136,60 @@ def test_guess_abstract_absent() -> None:
     assert guess_abstract([_block("Introduction", 10.0, top=100.0)]) is None
 
 
+# --- guess_authors ---
+
+
+def test_guess_authors_byline_with_affiliations() -> None:
+    blocks = [
+        _block("Catalytic oxidation over iron foam", 18.0, top=40.0),
+        _block("Yunjin Yao a,* , Yating Liu a , Zhenshan Ma b", 10.0, top=70.0),
+        _block("Abstract: ...", 10.0, top=100.0),
+    ]
+    assert guess_authors(blocks) == ["Yao, Yunjin", "Liu, Yating", "Ma, Zhenshan"]
+
+
+def test_guess_authors_with_and_separator() -> None:
+    blocks = [
+        _block("A Great Paper", 18.0, top=40.0),
+        _block("John Smith and Jane Doe", 10.0, top=70.0),
+    ]
+    assert guess_authors(blocks) == ["Smith, John", "Doe, Jane"]
+
+
+def test_guess_authors_stops_at_abstract() -> None:
+    blocks = [
+        _block("A Great Paper", 18.0, top=40.0),
+        _block("Abstract", 11.0, top=70.0),
+        _block("Some text that mentions a Name", 10.0, top=90.0),
+    ]
+    assert guess_authors(blocks) == []
+
+
+def test_guess_authors_empty_when_no_blocks() -> None:
+    assert guess_authors([]) == []
+
+
 # --- guess_year ---
 
 
-def test_guess_year() -> None:
-    assert guess_year("Received 2024; accepted 2025") == 2024
+def test_guess_year_prefers_later_anchored() -> None:
+    # received 2024 и accepted 2025 — оба у якорей, берём поздний (год публикации).
+    assert guess_year("Received 2024; accepted 2025") == 2025
+
+
+def test_guess_year_anchored_over_random() -> None:
+    # Год у © приоритетнее случайного года из тела статьи.
+    text = "...as shown in 1998 studies... © 2021 Elsevier B.V."
+    assert guess_year(text) == 2021
+
+
+def test_guess_year_fallback_to_latest_plausible() -> None:
+    # Без якорей — самый поздний правдоподобный (ссылки не новее публикации).
+    assert guess_year("refs: 2011, 2019, 2015 ... no anchors") == 2019
+
+
+def test_guess_year_ignores_implausible() -> None:
+    assert guess_year("code 3099 and id 1500") is None
 
 
 def test_guess_year_absent() -> None:
@@ -145,6 +202,7 @@ def test_guess_year_absent() -> None:
 def test_extract_metadata_offline_heuristics() -> None:
     blocks = [
         _block("Catalytic oxidation over iron foam", 18.0, top=40.0),
+        _block("Yunjin Yao a , Yating Liu b", 10.0, top=60.0),
         _block("Abstract: A study of catalysts.", 10.0, top=80.0),
     ]
     raw_text = "Catalytic oxidation... DOI 10.1016/j.ces.2025.121219 ... 2025"
@@ -157,7 +215,7 @@ def test_extract_metadata_offline_heuristics() -> None:
     assert meta.year == 2025
     assert meta.metadata_source == "pdf"
     assert 0.0 <= meta.metadata_confidence <= 1.0
-    assert meta.authors == []
+    assert meta.authors == ["Yao, Yunjin", "Liu, Yating"]
 
 
 # --- Логика флагов режимов (online / offline+llm / offline) ---
@@ -297,3 +355,64 @@ def test_extract_metadata_online_uses_crossref(monkeypatch: Any) -> None:
     assert meta.metadata_confidence == 0.9
     assert meta.title == "Manganese-iron supported on porous iron foam"
     assert meta.authors == ["Yao, Yunjin", "Liu, Yating"]
+
+
+# --- LLM (Ollama): парсинг ответа и сеть ---
+
+
+def _fake_ollama(content: str) -> "_FakeResponse":
+    """Ответ Ollama chat API: message.content — это JSON-строка от модели."""
+    return _FakeResponse({"message": {"role": "assistant", "content": content}})
+
+
+def test_query_llm_success(monkeypatch: Any) -> None:
+    reply = '{"title": "A Paper", "authors": ["Smith, John"], "abstract": "Text."}'
+
+    def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
+        return _fake_ollama(reply)
+
+    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    result = metadata.query_llm("some page text")
+
+    assert result == {
+        "title": "A Paper",
+        "authors": ["Smith, John"],
+        "abstract": "Text.",
+    }
+
+
+def test_query_llm_network_error_returns_none(monkeypatch: Any) -> None:
+    def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
+        raise httpx.ConnectError("ollama not running")
+
+    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    assert metadata.query_llm("text") is None
+
+
+def test_query_llm_invalid_json_returns_none(monkeypatch: Any) -> None:
+    def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
+        return _fake_ollama("это не json, а просто текст")
+
+    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    assert metadata.query_llm("text") is None
+
+
+def test_extract_metadata_offline_llm_fallback(monkeypatch: Any) -> None:
+    # Эвристики не нашли abstract -> LLM-фоллбэк отдаёт данные, source=hybrid.
+    monkeypatch.setattr(
+        metadata,
+        "query_llm",
+        lambda page_text, **kw: {
+            "title": "LLM Title",
+            "authors": ["Doe, Jane"],
+            "abstract": "LLM abstract.",
+        },
+    )
+    blocks = [_block("weak title", 12.0, top=40.0)]
+
+    meta = extract_metadata(blocks, "no doi", offline=True, use_llm=True)
+
+    assert meta.metadata_source == "hybrid"
+    assert meta.title == "LLM Title"
+    assert meta.authors == ["Doe, Jane"]
+    assert meta.abstract == "LLM abstract."

@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from datetime import date
 from typing import Any
 
 import httpx
@@ -27,23 +29,67 @@ DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+", re.IGNORECASE)
 #: Год публикации (4 цифры, разумный диапазон).
 YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
+#: Якоря публикационной даты: год рядом с ними считаем достовернее, чем
+#: случайный год из текста/списка литературы.
+_YEAR_ANCHORS = (
+    "©",
+    "(c)",
+    "copyright",
+    "published",
+    "available online",
+    "received",
+    "accepted",
+    "doi.org",
+)
+
 #: Хвостовая пунктуация, которую нужно срезать с пойманного DOI.
 _DOI_TRAILING = ".,;:)]}>\"'"
 
-#: Хвостовые маркеры аффилиаций ("Yao a,*", "Liu 1,2"). Каждый маркер — это
-#: число, символ-сноска или одиночная строчная буква, отделённая пробелом/запятой.
-#: Условие отделителя не даёт «съесть» строчные буквы самой фамилии.
-_AFFILIATION_MARKERS = re.compile(r"(?:[\s,]+(?:\d+|[*†‡§¶]|[a-z](?![a-z])))+\s*$")
+#: Хвостовые маркеры аффилиаций. Срезаются с конца строки автора:
+#:   - цифры/символы-сноски ("Tilki1,2", "Celikbıcak3") — даже прилипшие к фамилии;
+#:   - одиночная строчная буква ("Yao a,*") — только если отделена пробелом/запятой
+#:     (lookbehind не даёт «съесть» строчные буквы самой фамилии, напр. "Madonna").
+_AFFILIATION_MARKERS = re.compile(
+    r"(?:[\s,]*(?:\d+|[*†‡§¶]|(?<=[\s,])[a-z](?![a-z])))+\s*$"
+)
+
+#: Разделители авторов в строке byline (", ; · and &").
+_AUTHOR_SPLIT = re.compile(r"\s*(?:,|;|·|\band\b|&)\s*", re.IGNORECASE)
+
+#: Признак «в куске есть слово» (буквенная последовательность 2+).
+_HAS_WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
+
+#: Якоря, на которых заканчивается зона авторов на титульной странице.
+_AUTHOR_STOP_ANCHORS = ("abstract", "keywords", "introduction", "1.")
 
 #: Базовый эндпоинт CrossRef REST API.
 CROSSREF_BASE_URL = "https://api.crossref.org/works"
 
-#: Таймаут запроса к CrossRef, секунды.
-CROSSREF_TIMEOUT = 10.0
+#: Таймаут запроса к CrossRef, секунды (API временами отвечает >10с).
+CROSSREF_TIMEOUT = 20.0
 
 #: Контактный e-mail для «вежливого пула» CrossRef (стабильнее лимиты).
 #: Задаётся проектом; если None — запрос уходит без mailto.
 CROSSREF_MAILTO: str | None = None
+
+#: Эндпоинт локального сервера Ollama (chat API). Это localhost — работает offline.
+OLLAMA_URL = "http://localhost:11434/api/chat"
+
+#: Локальная модель для извлечения метаданных (см. README).
+OLLAMA_MODEL = "qwen2.5:3b"
+
+#: Таймаут запроса к локальной LLM, секунды.
+LLM_TIMEOUT = 60.0
+
+#: Системный промпт: извлечь метаданные строго в JSON.
+_LLM_SYSTEM_PROMPT = (
+    "Ты извлекаешь метаданные из текста титульной страницы научной статьи. "
+    "Верни СТРОГО JSON с ключами: "
+    'title (строка), '
+    'authors (список строк в формате "Фамилия, Имя"), '
+    "abstract (строка или null). "
+    "Не добавляй пояснений и markdown."
+)
 
 
 def find_doi(text: str) -> str | None:
@@ -150,10 +196,87 @@ def guess_abstract(blocks: list[PageBlock]) -> str | None:
     return None
 
 
+def _parse_author_line(text: str) -> list[str]:
+    """Разбивает строку byline на отдельных авторов в формате «Фамилия, Имя».
+
+    Куски-маркеры аффилиаций ("a", "*", "1") отсеиваются как «без слова».
+    """
+    authors: list[str] = []
+    seen: set[str] = set()
+    for piece in _AUTHOR_SPLIT.split(text):
+        piece = piece.strip()
+        if not piece or _HAS_WORD.search(piece) is None:
+            continue
+        name = normalize_author(piece)
+        if name and _HAS_WORD.search(name) is not None and name not in seen:
+            seen.add(name)
+            authors.append(name)
+    return authors
+
+
+def guess_authors(blocks: list[PageBlock]) -> list[str]:
+    """Эвристика авторов: первый «именной» блок под заголовком на стр. 1.
+
+    Авторы обычно расположены сразу под названием и до аннотации/аффилиаций.
+
+    Args:
+        blocks: Все блоки документа.
+
+    Returns:
+        Список авторов «Фамилия, Имя» либо ``[]``, если разобрать не удалось.
+    """
+    first_page = _text_blocks(blocks, 1)
+    if not first_page:
+        return []
+
+    title_block = max(
+        first_page,
+        key=lambda b: (b.font_size or 0.0, b.is_bold, -b.bbox.top),
+    )
+    below = sorted(
+        (b for b in first_page if b.bbox.top > title_block.bbox.top),
+        key=lambda b: b.bbox.top,
+    )
+    for block in below:
+        text = (block.text or "").strip()
+        if text.lower().startswith(_AUTHOR_STOP_ANCHORS):
+            break
+        names = _parse_author_line(text)
+        if names:
+            return names
+    return []
+
+
 def guess_year(text: str) -> int | None:
-    """Грубая эвристика года публикации (первое совпадение 19xx/20xx)."""
-    match = YEAR_RE.search(text)
-    return int(match.group(0)) if match else None
+    """Эвристика года публикации.
+
+    Приоритет — год рядом с публикационными якорями (©, published, received,
+    accepted, doi.org); иначе самый поздний правдоподобный год (ссылки в статье
+    не бывают новее года публикации). Неправдоподобные годы отсекаются.
+
+    Args:
+        text: Текст для поиска (приоритетно — титульная страница / front matter).
+
+    Returns:
+        Год публикации либо ``None``.
+    """
+    max_year = date.today().year + 1
+    low = text.lower()
+    anchored: list[int] = []
+    plausible: list[int] = []
+    for match in YEAR_RE.finditer(text):
+        year = int(match.group(0))
+        if not 1900 <= year <= max_year:
+            continue
+        plausible.append(year)
+        window = low[max(0, match.start() - 40) : match.end() + 40]
+        if any(anchor in window for anchor in _YEAR_ANCHORS):
+            anchored.append(year)
+    if anchored:
+        return max(anchored)
+    if plausible:
+        return max(plausible)
+    return None
 
 
 # --- Заглушки внешнего обогащения (CrossRef / LLM) ---
@@ -202,21 +325,48 @@ def query_crossref(doi: str) -> dict[str, Any] | None:
 
 
 def query_llm(page_text: str, *, model: str | None = None) -> dict[str, Any] | None:
-    """Извлекает метаданные локальной LLM из текста титульной страницы.
+    """Извлекает метаданные локальной LLM (Ollama) из текста титульной страницы.
 
-    Note:
-        Заглушка. Промпт: «извлеки title, authors, abstract строго в JSON».
-        Модель указывается в README; работает оффлайн.
+    Работает оффлайн: запрос идёт на localhost к локальному серверу Ollama.
+    Любая ошибка (сервер не поднят / таймаут / невалидный JSON) => ``None``.
 
     Args:
         page_text: Текст первой страницы.
-        model: Имя/путь локальной модели.
+        model: Имя модели Ollama (по умолчанию :data:`OLLAMA_MODEL`).
 
     Returns:
-        Словарь метаданных либо ``None``.
+        Словарь с ключами title/authors/abstract либо ``None``.
     """
-    logger.debug("LLM ещё не реализована, пропускаю")
-    return None
+    payload = {
+        "model": model or OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": _LLM_SYSTEM_PROMPT},
+            {"role": "user", "content": page_text},
+        ],
+        "format": "json",
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }
+    try:
+        response = httpx.post(OLLAMA_URL, json=payload, timeout=LLM_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning(f"Локальная LLM недоступна: {exc}")
+        return None
+
+    message = data.get("message") if isinstance(data, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        logger.warning("LLM вернула неожиданный ответ")
+        return None
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"LLM вернула невалидный JSON: {exc}")
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def extract_metadata(
@@ -257,25 +407,29 @@ def extract_metadata(
     # 2. Оффлайн-эвристики по блокам (всегда доступны).
     title = guess_title(blocks)
     abstract = guess_abstract(blocks)
+    authors = guess_authors(blocks)
     year = guess_year(raw_text)
 
     source = "pdf"
     confidence = 0.4 if title else 0.2
 
-    # 3. LLM-фоллбэк, если эвристики дали мало (нет заголовка/аннотации).
-    if use_llm and (not title or abstract is None):
+    # 3. LLM-фоллбэк, если эвристики дали мало (нет заголовка/аннотации/авторов).
+    if use_llm and (not title or abstract is None or not authors):
         first_page_text = "\n".join(b.text or "" for b in _text_blocks(blocks, 1))
         llm = query_llm(first_page_text)
         if llm is not None:
             title = str(llm.get("title") or title)
             abstract = llm.get("abstract") or abstract
+            llm_authors = llm.get("authors")
+            if isinstance(llm_authors, list) and llm_authors:
+                authors = [normalize_author(str(a)) for a in llm_authors]
             source = "hybrid"
             confidence = 0.6
 
     return Metadata(
         title=title,
         title_en=None,
-        authors=[],  # TODO: извлечение блока авторов + normalize_author
+        authors=authors,
         abstract=abstract,
         keywords=[],
         doi=doi,
