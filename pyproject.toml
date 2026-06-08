@@ -15,6 +15,7 @@ dependencies = [
     "pdf2image>=1.17.0",
     "pillow>=12.2.0",
     "pypdfium2>=5.9.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
