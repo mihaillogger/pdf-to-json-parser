@@ -5,12 +5,10 @@ from typing import Annotated
 import typer
 from loguru import logger
 
-# Создаем приложение Typer
 app = typer.Typer(
     help="Конвейер для парсинга научных PDF-статей в структурированный JSON.",
     add_completion=False,
 )
-
 
 @app.command()
 def process(
@@ -34,7 +32,10 @@ def process(
     ] = 1,
     overwrite: Annotated[
         bool,
-        typer.Option("--overwrite", help="Перезаписывать существующие JSON-файлы"),
+        typer.Option(
+            "--overwrite",
+            help="Перезаписывать существующие JSON-файлы",
+        ),
     ] = False,
     log_level: Annotated[
         str,
@@ -44,13 +45,35 @@ def process(
         bool,
         typer.Option("--extract-images", help="Сохранять изображения фигур"),
     ] = True,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help=(
+                "Отключить все сетевые запросы "
+                "(принудительный локальный режим)"
+            ),
+        ),
+    ] = False,
+    use_crossref: Annotated[
+        bool,
+        typer.Option(
+            "--crossref/--no-crossref",
+            help="Использовать Crossref API для поиска метаданных",
+        ),
+    ] = True,
+    use_llm: Annotated[
+        bool,
+        typer.Option(
+            "--llm/--no-llm",
+            help="Использовать LLM для извлечения сложных структур",
+        ),
+    ] = True,
 ) -> None:
     """
     Главная точка входа. Валидирует пути и передает управление в ядро
     парсера (pipeline.py).
     """
-    # 1. Жесткая настройка логгера по ТЗ
-    # 1. Жесткая настройка логгера по ТЗ
     logger.remove()
     log_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -58,7 +81,6 @@ def process(
     )
     logger.add(sys.stdout, level=log_level.upper(), format=log_format)
 
-    # Создаем выходную папку и вешаем туда запись полных трейсов
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.add(output_dir / "run.log", level="DEBUG", rotation="10 MB")
 
@@ -67,22 +89,30 @@ def process(
         f"Параметры: workers={workers}, overwrite={overwrite}, "
         f"extract_images={extract_images}"
     )
+    logger.info(
+        f"Режимы работы: offline={offline}, use_crossref={use_crossref}, "
+        f"use_llm={use_llm}"
+    )
 
-    # 2. Валидация входных данных
     if not input_path.exists():
         logger.error(f"Указанный путь не существует: {input_path}")
         raise typer.Exit(code=1)
 
-    # 3. Маршрутизация в ядро
     if input_path.is_file() and input_path.suffix.lower() == ".pdf":
         logger.info("Режим: Одиночный документ")
-        # Вызов process_single_file(input_path, output_dir, overwrite, extract_images)
-        logger.warning("TODO: Здесь будет вызов process_single_file из pipeline.py")
+        logger.warning(
+            "TODO: Здесь будет вызов process_single_file из pipeline.py "
+            f"с флагами: offline={offline}, crossref={use_crossref}, "
+            f"llm={use_llm}"
+        )
 
     elif input_path.is_dir():
         logger.info("Режим: Пакетная обработка директории")
-        # Вызов process_directory(input_path, output_dir, workers, ...)
-        logger.warning("TODO: Здесь будет вызов process_directory из pipeline.py")
+        logger.warning(
+            "TODO: Здесь будет вызов process_directory из pipeline.py "
+            f"с флагами: offline={offline}, crossref={use_crossref}, "
+            f"llm={use_llm}"
+        )
 
     else:
         logger.error("Указанный путь не является PDF-файлом или директорией.")

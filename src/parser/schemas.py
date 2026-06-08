@@ -155,4 +155,4 @@ class Document(BaseSchema):
         None, description="Текст раздела Acknowledgements или null"
     )
     raw_text: str = Field(..., description="Полный текст документа")
-    
+
