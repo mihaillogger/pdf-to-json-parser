@@ -5,11 +5,25 @@ from pydantic import BaseModel, Field, model_validator
 
 
 def clean_text(text: str | None) -> str | None:
-    """Очищает текст от trailing whitespace и висячих переносов."""
+    """
+    Очищает текст от trailing whitespace, висячих переносов
+    и артефактов вёрстки (неразрывных пробелов, лишних переносов строк).
+    """
     if not text:
         return text
-    # Склеиваем переносы слов: "поверхно-\nстный" -> "поверхностный"
-    cleaned = re.sub(r"-\s*\n\s*", "", text)
+
+    # 1. Заменяем неразрывный пробел \xa0 на обычный
+    cleaned = text.replace("\xa0", " ")
+
+    # 2. Склеиваем переносы слов: "поверхно-\nстный" -> "поверхностный"
+    cleaned = re.sub(r"-\s*\n\s*", "", cleaned)
+
+    # 3. Заменяем одинарные переносы строк на пробелы (сохраняя \n\n)
+    cleaned = re.sub(r"(?<!\n)\n(?!\n)", " ", cleaned)
+
+    # 4. Схлопываем множественные пробелы в один, которые могли появиться
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+
     return cleaned.strip()
 
 
@@ -45,7 +59,9 @@ class PageBlock(BaseSchema):
     от I/O экстрактора в алгоритмы сборки секций и фигур.
     """
 
-    text: str | None = Field(None, description="Текст блока (null, если это картинка)")
+    text: str | None = Field(
+        None, description="Текст блока (null, если это картинка)"
+    )
     font_size: float | None = Field(
         None, description="Максимальный размер шрифта в блоке (null для картинок)"
     )
@@ -76,6 +92,9 @@ class Metadata(BaseSchema):
     )
     metadata_confidence: float = Field(
         ..., ge=0.0, le=1.0, description="Оценка уверенности [0..1]"
+    )
+    normative: Any | None = Field(
+        None, description="Поле из эталона, по умолчанию null"
     )
 
 
@@ -155,4 +174,4 @@ class Document(BaseSchema):
         None, description="Текст раздела Acknowledgements или null"
     )
     raw_text: str = Field(..., description="Полный текст документа")
-
+    
