@@ -3570,6 +3570,7 @@ source = { editable = "." }
 dependencies = [
     { name = "camelot-py" },
     { name = "doclayout-yolo" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "jupyter" },
     { name = "loguru" },
@@ -3605,6 +3606,7 @@ dev = [
 requires-dist = [
     { name = "camelot-py", specifier = ">=1.0.9" },
     { name = "doclayout-yolo", specifier = ">=0.0.4" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=1.17.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "loguru", specifier = ">=0.7.2" },
