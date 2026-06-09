@@ -67,7 +67,9 @@ class VLMTableExtractor:
         )
 
         try:
-            logger.info("[VLM] Анализ структуры таблицы: %s", os.path.basename(image_path))
+            logger.info(
+                "[VLM] Анализ структуры таблицы: %s", os.path.basename(image_path)
+            )
             response = ollama.chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt, "images": [image_path]}],
@@ -83,7 +85,9 @@ class VLMTableExtractor:
                 data_layer = parsed_json["data"]
                 if isinstance(data_layer, list):
                     if data_layer and not isinstance(data_layer[0], list):
-                        logger.warning("[VLM] Обнаружен плоский 1D-массив. Реструктуризация.")
+                        logger.warning(
+                            "[VLM] Обнаружен плоский 1D-массив. Реструктуризация."
+                        )
                         parsed_json["data"] = [[str(item)] for item in data_layer]
                     else:
                         parsed_json["data"] = [
@@ -157,7 +161,7 @@ class SpatialExtractor:
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            
+
             temp_img_path = os.path.join(
                 self.output_img_dir, f"temp_p{page_num}.png"
             )
@@ -166,7 +170,7 @@ class SpatialExtractor:
             results = self.model.predict(
                 temp_img_path, imgsz=1024, conf=0.25, verbose=False
             )
-            
+
             if os.path.exists(temp_img_path):
                 os.remove(temp_img_path)
 
@@ -208,7 +212,7 @@ class SpatialExtractor:
                 elif class_name == "table":
                     img_filename = f"tab_{tab_cnt}_p{page_num + 1}.png"
                     path = os.path.join(self.output_img_dir, img_filename)
-                    
+
                     page.get_pixmap(clip=rect, dpi=300).save(path)
 
                     table_data = self.vlm.extract_2d_array(path)
