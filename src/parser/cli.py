@@ -52,7 +52,10 @@ def process(
     ] = "INFO",
     extract_images: Annotated[
         bool,
-        typer.Option("--extract-images", help="Сохранять изображения фигур"),
+        typer.Option(
+            "--extract-images/--no-extract-images",
+            help="Сохранять (или пропускать) изображения фигур и таблицы",
+        ),
     ] = True,
     offline: Annotated[
         bool,
