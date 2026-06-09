@@ -24,16 +24,22 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
-#: Скалярные поля и режим сравнения (fuzzy=вложенность строк допустима).
-SCALAR_FIELDS: dict[str, bool] = {
-    "title": True,
-    "doi": False,
-    "year": False,
-    "journal": True,
-    "abstract": True,
+#: Скалярные поля и режим сравнения:
+#: "exact" — строгое равенство, "fuzzy" — вложенность строк,
+#: "ratio" — похожесть текста выше порога (для длинных полей вроде abstract).
+SCALAR_FIELDS: dict[str, str] = {
+    "title": "fuzzy",
+    "doi": "exact",
+    "year": "exact",
+    "journal": "fuzzy",
+    "abstract": "ratio",
 }
+
+#: Порог похожести для длинного текста (abstract): доля совпадения 0..1.
+TEXT_RATIO_THRESHOLD = 0.85
 
 #: Множественные поля -> функция нормализации одного элемента.
 SET_FIELDS: dict[str, Callable[[str], str]] = {}
@@ -81,6 +87,20 @@ def scalar_match(pred: Any, gold: Any, *, fuzzy: bool) -> bool:
     if np == ng:
         return True
     return fuzzy and (np in ng or ng in np)
+
+
+def text_ratio_match(pred: Any, gold: Any, threshold: float) -> bool:
+    """Совпадение длинного текста по похожести (для abstract).
+
+    Строгая вложенность для свободного текста слишком хрупка (один символ ломает
+    substring), поэтому сравниваем долю совпадения последовательностей.
+    """
+    np, ng = _norm(pred), _norm(gold)
+    if not np or not ng:
+        return False
+    if np == ng or np in ng or ng in np:
+        return True
+    return SequenceMatcher(None, np, ng).ratio() >= threshold
 
 
 def set_prf(
@@ -171,8 +191,15 @@ def _f1(precision: float, recall: float) -> float:
     return 0.0 if denom == 0 else 2 * precision * recall / denom
 
 
+def _scalar_match_mode(pred: Any, gold: Any, mode: str) -> bool:
+    """Совпадение скалярного поля по режиму exact/fuzzy/ratio."""
+    if mode == "ratio":
+        return text_ratio_match(pred, gold, TEXT_RATIO_THRESHOLD)
+    return scalar_match(pred, gold, fuzzy=(mode == "fuzzy"))
+
+
 def _score_scalar(predictions: list[Any], golds: list[Any], name: str) -> FieldScore:
-    fuzzy = SCALAR_FIELDS[name]
+    mode = SCALAR_FIELDS[name]
     predicted = correct = support = 0
     for pred, gold in zip(predictions, golds):
         pv, gv = _get(pred, name), _get(gold, name)
@@ -180,7 +207,7 @@ def _score_scalar(predictions: list[Any], golds: list[Any], name: str) -> FieldS
             support += 1
         if not _is_empty(pv):
             predicted += 1
-            if scalar_match(pv, gv, fuzzy=fuzzy):
+            if _scalar_match_mode(pv, gv, mode):
                 correct += 1
     precision = correct / predicted if predicted else 0.0
     recall = correct / support if support else 0.0

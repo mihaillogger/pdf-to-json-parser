@@ -8,6 +8,7 @@ from parser.evaluation import (
     scalar_match,
     section_headings,
     set_prf,
+    text_ratio_match,
 )
 
 
@@ -114,6 +115,18 @@ def test_set_prf_generic_lowercase_normalizer() -> None:
     # keywords сравниваются без учёта регистра/пунктуации.
     p, r, f = set_prf(["Catalysis", "ROS"], ["catalysis", "ros"], str.lower)
     assert (p, r, f) == (1.0, 1.0, 1.0)
+
+
+def test_text_ratio_match_near_identical_long_text() -> None:
+    # Длинный текст с разницей в один символ: substring рвётся, ratio — нет.
+    gold = "the magnetic chitosan beads were prepared and grafted with monomer x"
+    pred = "the magnetic chitosan beads were prepared and grafted with monomer y"
+    assert not scalar_match(pred, gold, fuzzy=True)  # строгий substring не ловит
+    assert text_ratio_match(pred, gold, 0.85)  # похожесть ловит
+
+
+def test_text_ratio_match_below_threshold() -> None:
+    assert not text_ratio_match("completely different text", "another unrelated", 0.85)
 
 
 def test_section_headings_flattens_tree() -> None:
