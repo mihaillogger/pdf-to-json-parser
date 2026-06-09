@@ -1,12 +1,18 @@
+"""
+Модуль для сборки иерархического дерева секций научного документа.
+
+Использует конечный автомат на основе стека для преобразования плоского
+массива текстовых блоков (PageBlock) в рекурсивную структуру (Section).
+Определение заголовков базируется на эвристиках: анализе размера шрифта,
+жирности, регулярных выражениях для нумерации и словаре стандартной
+онтологии научных статей.
+"""
+
 import re
 from collections import Counter
-from typing import List, Optional, Tuple
 
 from parser.schemas import PageBlock, Section
 
-# Фоллбэк для сломанных PDF
-# Используется как запасной механизм определения секций, если
-# PDF-документ потерял метаданные жирности шрифта.
 STANDARD_SECTION_ONTOLOGY = {
     "introduction",
     "results",
@@ -21,7 +27,6 @@ STANDARD_SECTION_ONTOLOGY = {
     "abstract",
 }
 
-# Ключевые слова для отсечения мусорных колонтитулов и врезок
 SKIP_HEADER_KEYWORDS = {
     "keywords:",
     "graphical abstract",
@@ -39,15 +44,14 @@ SKIP_HEADER_KEYWORDS = {
 }
 
 
-def _get_base_font_size(blocks: List[PageBlock]) -> float:
-    """
-    Вычисляет базовый размер шрифта документа (обычный текст).
+def _get_base_font_size(blocks: list[PageBlock]) -> float:
+    """Определяет базовый размер шрифта основного текста документа.
 
     Args:
-        blocks: Список всех блоков документа.
+        blocks: Список извлеченных блоков страницы.
 
     Returns:
-        Наиболее часто встречающийся размер шрифта.
+        float: Наиболее часто встречающийся размер шрифта (мода).
     """
     fonts = [
         b.font_size
@@ -68,44 +72,49 @@ def _analyze_heading(
     is_bold: bool,
     title_found: bool,
     in_references: bool,
-) -> Tuple[bool, int, Optional[str]]:
-    """
-    Анализирует текстовый блок и определяет, является ли он заголовком.
-    Опирается на размер шрифта, жирность и эталонную структуру.
+) -> tuple[bool, int, str | None]:
+    """Анализирует текстовый блок на принадлежность к заголовку секции.
+
+    Опирается на эвристики размера шрифта, жирности, регулярные выражения
+    для нумерации и словарь стандартных названий секций.
 
     Args:
-        text: Текст блока.
-        font_size: Размер шрифта блока.
+        text: Содержимое текстового блока.
+        font_size: Максимальный размер шрифта в блоке.
         base_font: Базовый размер шрифта документа.
-        is_bold: Флаг жирного шрифта.
-        title_found: Флаг наличия главного заголовка статьи.
-        in_references: Флаг нахождения в блоке списка литературы.
+        is_bold: Флаг наличия жирного начертания.
+        title_found: Флаг, указывающий, был ли уже найден заголовок H1.
+        in_references: Флаг нахождения парсера внутри списка литературы.
 
     Returns:
-        Кортеж (is_heading, level, number).
+        tuple: (Является ли заголовком, Уровень вложенности, Номер секции или None).
     """
     text = text.strip()
     text_lower = text.lower()
 
+    # Если мы провалились в References, ловим только подзаголовки
     if in_references:
         if not re.match(r"^(appendix|supplementary|section\s+s|s\d+)", text_lower):
             return False, 0, None
 
+    # Отсекаем подписи к рисункам и таблицам, чтобы они не ломали дерево
     if re.match(r"^(figure|fig\.|table|scheme)\s*\d+", text_lower):
         return False, 0, None
 
+    # Пропуск для известных заголовков
     if text_lower in STANDARD_SECTION_ONTOLOGY:
         return True, 2, None
 
     if len(text) < 4 or len(text) > 300:
         return False, 0, None
 
+    # Игнорируем блоки, состоящие только из цифр и единиц измерения
     if re.fullmatch(
         r"[\d\s\.\,\-]+(?:mM|cm|mm|mV|mA|h|min|s|kΩ|µm)?", text, re.IGNORECASE
     ):
         return False, 0, None
 
-    # Поиск нумерации
+    # Регулярка для отлова нумерованных заголовков
     match = re.match(
         r"^((?:Section\s+)?S\d+|(?:\d+\.)+\d*|\d+\.?|[IVX]+\.)[\s\-]+(.+)",
         text,
@@ -127,26 +136,27 @@ def _analyze_heading(
                 return False, 0, None
 
             # В заголовках редко бывает много запятых
-            # Запятые в начале строки часто указывают на список авторов или аффилиации
             if text.count(",") >= 2:
                 return False, 0, None
 
+            # Защита от ложных срабатываний на инициалах авторов (например, "A. Smith")
             if not re.match(r"^[A-Z]\.\s+[A-Z]", rest_text):
                 level = len(number_str.split(".")) + 1
                 return True, level, number_str
 
-    # Эвристики по шрифту
+    # Эвристика H1: шрифт значительно больше базового (обычно название статьи)
     if font_size > base_font + 2.5:
         if not title_found:
             return True, 1, None
+
+    # Эвристика H2+: шрифт жирный и не меньше базового
     elif is_bold and font_size >= base_font - 0.5:
         if not text.endswith(".") and len(text) < 100 and "\n" not in text:
-            # Вырезаем спецсимволы в начале, чтобы проверить первую букву
+            # Срезаем стартовые спецсимволы, чтобы проверить первую букву
             clean_start = re.sub(r"^[^a-zA-Z]+", "", text)
-
-            # Заголовки разделов в большинстве случаев начинаются с заглавной буквы
             is_lower_start = bool(clean_start and clean_start[0].islower())
 
+            # Если много пунктуации - это скорее всего мусор, а не заголовок
             has_too_much_punct = (text.count(",") >= 2) or (";" in text)
 
             if not is_lower_start and not has_too_much_punct:
@@ -157,22 +167,28 @@ def _analyze_heading(
     return False, 0, None
 
 
-def build_section_tree(blocks: List[PageBlock]) -> List[Section]:
-    """
-    Собирает плоский список текстовых блоков в рекурсивное дерево секций.
+def build_section_tree(blocks: list[PageBlock]) -> list[Section]:
+    """Преобразует плоский массив текстовых блоков в иерархическое дерево секций.
+
+    Использует алгоритм на основе стека для отслеживания текущего уровня вложенности
+    и правильной привязки подсекций к родительским узлам.
 
     Args:
-        blocks: Отсортированный по порядку чтения список блоков от экстрактора.
+        blocks: Отсортированный массив объектов PageBlock.
 
     Returns:
-        Список корневых объектов Section (уровень 1) с вложенными подсекциями.
+        list[Section]: Список корневых секций документа.
     """
     if not blocks:
         return []
 
     base_font = _get_base_font_size(blocks)
-    root_sections: List[Section] = []
-    stack: List[Section] = []
+    root_sections: list[Section] = []
+
+    # Стек для отслеживания текущей ветки дерева
+    stack: list[Section] = []
+    # Трекер размеров шрифта для динамического вычисления уровней (H2, H3 и т.д.)
+    level_fonts: dict[int, float] = {}
 
     current_section = None
     title_found = False
@@ -186,6 +202,7 @@ def build_section_tree(blocks: List[PageBlock]) -> List[Section]:
         if not text:
             continue
 
+        # Разделяем слипшиеся заголовки (например, "Abstract\nHere is the text")
         lines = text.split("\n", 1)
         if len(lines) == 2 and lines[0].strip().lower() in STANDARD_SECTION_ONTOLOGY:
             chunks = [
@@ -215,6 +232,21 @@ def build_section_tree(blocks: List[PageBlock]) -> List[Section]:
                 if chunk_text.lower() == "references":
                     in_references = True
 
+                # Динамическое вычисление уровня вложенности
+                # на основе падения/роста размера шрифта
+                if number is None and stack and level >= 2:
+                    current_parent_level = stack[-1].level
+                    current_parent_font = level_fonts.get(current_parent_level, 0.0)
+
+                    if chunk_font < current_parent_font - 0.5:
+                        level = current_parent_level + 1
+                    elif chunk_font > current_parent_font + 0.5:
+                        level = max(2, current_parent_level - 1)
+                    else:
+                        level = current_parent_level
+
+                level_fonts[level] = chunk_font
+
                 new_section = Section(
                     heading=chunk_text,
                     level=level,
@@ -225,6 +257,7 @@ def build_section_tree(blocks: List[PageBlock]) -> List[Section]:
                     status_effective_from=None,
                 )
 
+                # Выкидываем из стека все секции, чей уровень больше или равен текущему
                 while stack and stack[-1].level >= level:
                     stack.pop()
 
@@ -236,58 +269,40 @@ def build_section_tree(blocks: List[PageBlock]) -> List[Section]:
                 stack.append(new_section)
                 current_section = new_section
             else:
-                # Если мы еще не встретили ни одного заголовка, весь текст
-                # до первого H1/H2 считаем метаданными или абстрактом
-                if not current_section:
-                    current_section = Section(
-                        heading="Metadata/Abstract",
-                        level=1,
-                        content="",
-                        subsections=[],
-                        number=None,
-                        status=None,
-                        status_effective_from=None,
-                    )
-                    root_sections.append(current_section)
-                    stack.append(current_section)
-
-                if current_section.content:
-                    current_section.content += f"\n\n{chunk_text}"
-                else:
-                    current_section.content = chunk_text
+                # Пропускаем мусор с титульной страницы (аффилиации, почты),
+                # пока не встретим первый валидный заголовок.
+                if current_section:
+                    if current_section.content:
+                        current_section.content += f"\n\n{chunk_text}"
+                    else:
+                        current_section.content = chunk_text
 
     return root_sections
 
 
-def extract_acknowledgments(sections: List[Section]) -> Optional[str]:
-    """
-    Извлекает текст раздела благодарностей из собранного дерева секций.
+def extract_acknowledgments(sections: list[Section]) -> str | None:
+    """Рекурсивно ищет, извлекает и удаляет раздел благодарностей из дерева.
 
-    Ищет секции с заголовками, соответствующими вариациям "Acknowledgements"
-    или "Acknowledgments" или "Funding". Если находит, вырезает текст,
-    удаляет саму секцию из дерева (для избежания дублирования данных)
-    и возвращает строку.
+    Мутирует переданный список `sections`, удаляя найденный узел, чтобы
+    избежать дублирования текста в итоговом JSON.
 
     Args:
-        sections: Список корневых секций (дерево).
+        sections: Список секций (текущий уровень дерева).
 
     Returns:
-        Текст раздела благодарностей единой строкой или None, если он отсутствует.
+        str | None: Текст раздела благодарностей или None.
     """
     target_keywords = {"acknowledgements", "acknowledgments", "funding"}
 
     for i, section in enumerate(sections):
-        # Проверяем корневые секции
         if section.heading.strip().lower() in target_keywords:
             ack_text = section.content.strip()
             sections.pop(i)
             return ack_text if ack_text else None
 
-        # Проверяем подсекции
-        for j, sub in enumerate(section.subsections):
-            if sub.heading.strip().lower() in target_keywords:
-                ack_text = sub.content.strip()
-                section.subsections.pop(j)
-                return ack_text if ack_text else None
+        if section.subsections:
+            sub_ack = extract_acknowledgments(section.subsections)
+            if sub_ack:
+                return sub_ack
 
     return None
