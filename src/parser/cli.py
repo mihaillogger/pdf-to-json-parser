@@ -106,7 +106,7 @@ def process(
 
     if input_path.is_file() and input_path.suffix.lower() == ".pdf":
         logger.info("Режим: Одиночный документ")
-        pipeline.process_single_file(
+        status = pipeline.process_single_file(
             pdf_path=input_path,
             output_dir=output_dir,
             overwrite=overwrite,
@@ -115,6 +115,7 @@ def process(
             use_llm=use_llm,
             extract_images=extract_images,
         )
+        pipeline.log_doc_status(status)
 
     elif input_path.is_dir():
         logger.info("Режим: Пакетная обработка директории")
