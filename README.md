@@ -220,6 +220,12 @@ uv run python -m parser --input ./pdfs --output out/ --workers 4
 
 > Все кропы и соответствующие им `bbox`/`caption`/`id` — в [`examples/`](examples/).
 
+### Веб-интерфейс (Streamlit)
+
+Загрузка PDF и просмотр результата в браузере (`docker-compose up` → http://localhost:8501):
+
+![Веб-интерфейс Streamlit](assets/streamlit_ui.png)
+
 ---
 
 ## 📈 Оценка качества

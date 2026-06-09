@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import fitz
+from loguru import logger
 
 from parser.evaluation import evaluate
 from parser.extractor import get_page_blocks
@@ -51,6 +53,11 @@ def _predict(pdf_path: str, flags: dict[str, bool]) -> dict[str, Any]:
 
 
 def main() -> None:
+    # Глушим дефолтный DEBUG-сток loguru, чтобы DEBUG-логи парсера не засоряли
+    # вывод метрик в консоли (оставляем только предупреждения и ошибки).
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
+
     parser = argparse.ArgumentParser(description="Метрики качества метаданных")
     parser.add_argument("--input", default=".", help="Папка с PDF")
     parser.add_argument("--gold", default="evaluation/gold.json", help="Эталон JSON")
