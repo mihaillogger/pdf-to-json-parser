@@ -20,3 +20,9 @@ training/datasets/
 Thumbs.db
 # Эталонная разметка для метрик (нужна в репозитории)
 !evaluation/gold.json
+
+# Демонстрационные примеры (ТЗ 7.1) — PDF + ожидаемый JSON + кропы
+!examples/
+!examples/*.json
+!examples/images/
+!examples/images/**

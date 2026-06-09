@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -631,13 +632,25 @@ def _crossref_year(message: dict[str, Any]) -> int | None:
     return None
 
 
+def _clean_markup(value: str | None) -> str | None:
+    """Срезает остаточные XML/JATS-теги и декодирует HTML-сущности.
+
+    CrossRef отдаёт поля с разметкой: ``iridium(<scp>iii</scp>)`` в title,
+    ``Crystal Growth &amp; Design`` в journal. Чистим до читаемого текста.
+    """
+    if not value:
+        return value
+    text = re.sub(r"<[^>]+>", "", value)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip() or None
+
+
 def _crossref_abstract(message: dict[str, Any]) -> str | None:
     """Достаёт abstract, очищая JATS/XML-теги (<jats:p> и т.п.)."""
     raw = message.get("abstract")
     if not isinstance(raw, str) or not raw.strip():
         return None
-    text = re.sub(r"<[^>]+>", "", raw).strip()
-    return text or None
+    return _clean_markup(raw)
 
 
 def _build_from_crossref(doi: str, message: dict[str, Any]) -> Metadata:
@@ -657,13 +670,13 @@ def _build_from_crossref(doi: str, message: dict[str, Any]) -> Metadata:
         else []
     )
     return Metadata(
-        title=_first(message.get("title")) or "",
+        title=_clean_markup(_first(message.get("title"))) or "",
         title_en=None,
         authors=_crossref_authors(message),
         abstract=_crossref_abstract(message),
         keywords=keywords,
         doi=doi,
-        journal=_first(message.get("container-title")),
+        journal=_clean_markup(_first(message.get("container-title"))),
         year=_crossref_year(message),
         metadata_source="crossref",
         metadata_confidence=0.9,
