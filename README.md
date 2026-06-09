@@ -224,7 +224,17 @@ uv run python -m parser --input ./pdfs --output out/ --workers 4
 
 Загрузка PDF и просмотр результата в браузере (`docker-compose up` → http://localhost:8501):
 
-![Веб-интерфейс Streamlit](assets/streamlit_ui.png)
+**Стартовый экран (загрузка PDF):**
+
+![Streamlit — стартовый экран](assets/streamlit_1_start.jpg)
+
+**Итоговый JSON по схеме ТЗ:**
+
+![Streamlit — JSON](assets/streamlit_2_json.jpg)
+
+**Извлечённые фигуры:**
+
+![Streamlit — извлечённые фигуры](assets/streamlit_3_figures.png)
 
 ---
 
