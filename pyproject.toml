@@ -51,7 +51,7 @@ select = ["E", "W", "F", "I"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "app.py"]
 
 exclude = [
     ".venv",
@@ -73,7 +73,8 @@ module = [
     "huggingface_hub.*",
     "loguru.*",
     "typer.*",
-    "ollama.*"
+    "ollama.*",
+    "streamlit.*"
 ]
 ignore_missing_imports = true
 follow_imports = "skip"
