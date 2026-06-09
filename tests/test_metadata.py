@@ -176,10 +176,38 @@ def test_guess_authors_byline_with_affiliations() -> None:
 
 def test_guess_authors_with_and_separator() -> None:
     blocks = [
-        _block("A Great Paper", 18.0, top=40.0),
+        _block("A Comprehensive Study of Reaction Kinetics", 18.0, top=40.0),
         _block("John Smith and Jane Doe", 10.0, top=70.0),
     ]
     assert guess_authors(blocks) == ["Smith, John", "Doe, Jane"]
+
+
+def test_guess_title_skips_journal_masthead() -> None:
+    # Баннер журнала крупнее заголовка, но должен быть отброшен.
+    blocks = [
+        _block("Chemical Society Reviews", 21.0, top=52.0),
+        _block("View Article Online", 9.0, top=94.0, is_bold=True),
+        _block("Recent progress in fluorescent probes for imaging", 16.0, top=136.0),
+    ]
+    assert guess_title(blocks) == "Recent progress in fluorescent probes for imaging"
+
+
+def test_guess_title_skips_url_junk() -> None:
+    blocks = [
+        _block("www.elsevier.com/locate/ijpharm", 14.0, top=60.0),
+        _block("A novel image analysis methodology for monitoring", 13.0, top=160.0),
+    ]
+    assert guess_title(blocks) == "A novel image analysis methodology for monitoring"
+
+
+def test_guess_authors_rejects_junk_and_nonpersons() -> None:
+    # Блок-ссылка и строка-«не имя» не должны попасть в авторов.
+    blocks = [
+        _block("Real Long Article Title About Chemistry", 16.0, top=40.0),
+        _block("View Article Online", 9.0, top=70.0),
+        _block("the Lead Mixed-Halide Perovskites Unraveling", 10.0, top=90.0),
+    ]
+    assert guess_authors(blocks) == []
 
 
 def test_guess_authors_stops_at_abstract() -> None:
@@ -440,3 +468,30 @@ def test_extract_metadata_offline_llm_fallback(monkeypatch: Any) -> None:
     assert meta.title == "LLM Title"
     assert meta.authors == ["Doe, Jane"]
     assert meta.abstract == "LLM abstract."
+
+
+def test_extract_metadata_llm_does_not_overwrite_good_heuristics(
+    monkeypatch: Any,
+) -> None:
+    # Эвристики дали хорошие title+authors, но нет abstract: LLM заполняет ТОЛЬКО
+    # пробел (abstract), не затирая удачные поля своими (возможно врущими).
+    monkeypatch.setattr(
+        metadata,
+        "query_llm",
+        lambda page_text, **kw: {
+            "title": "Hallucinated Wrong Title",
+            "authors": ["Wrong, Person"],
+            "abstract": "Filled abstract from LLM.",
+        },
+    )
+    blocks = [
+        _block("A Detailed Investigation of Catalyst Surfaces", 18.0, top=40.0),
+        _block("John Smith and Jane Doe", 10.0, top=70.0),
+    ]
+
+    meta = extract_metadata(blocks, "no doi", offline=True, use_llm=True)
+
+    # title и authors остались от эвристик, abstract — от LLM
+    assert meta.title == "A Detailed Investigation of Catalyst Surfaces"
+    assert meta.authors == ["Smith, John", "Doe, Jane"]
+    assert meta.abstract == "Filled abstract from LLM."

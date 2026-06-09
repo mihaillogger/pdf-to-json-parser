@@ -66,6 +66,64 @@ _HAS_WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
 #: Якоря, на которых заканчивается зона авторов на титульной странице.
 _AUTHOR_STOP_ANCHORS = ("abstract", "keywords", "introduction", "1.")
 
+#: Подстроки служебных блоков (баннеры/ссылки/лицензии) — это не title/authors.
+_JUNK_MARKERS = (
+    "http://",
+    "https://",
+    "www.",
+    "@",
+    "doi.org",
+    "doi:",
+    "view article online",
+    "view journal",
+    "view issue",
+    "contents lists",
+    "sciencedirect",
+    "homepage",
+    "cite this",
+    "creative commons",
+    "open access",
+    "accepted manuscript",
+    "electronic supplementary",
+    "supporting information",
+    "available online",
+    "published on",
+    "downloaded on",
+    "licence",
+    "license",
+    "issn",
+    "review article",
+    "research article",
+    "full paper",
+)
+
+#: «Журнальные» слова: короткий блок-баннер у верха с таким словом — не заголовок.
+_JOURNAL_WORDS = frozenset(
+    {
+        "journal",
+        "review",
+        "reviews",
+        "letters",
+        "communications",
+        "proceedings",
+        "advances",
+        "discussions",
+        "transactions",
+        "bulletin",
+    }
+)
+
+#: Частицы фамилий, допустимые в нижнем регистре внутри имени автора.
+_NAME_PARTICLES = frozenset(
+    {
+        "van", "von", "de", "der", "den", "del",
+        "dos", "da", "di", "la", "le", "bin", "al",
+    }
+)
+
+#: Минимальная длина правдоподобного заголовка (короче — зовём LLM).
+_MIN_TITLE_LEN = 12
+
 #: Базовый эндпоинт CrossRef REST API.
 CROSSREF_BASE_URL = "https://api.crossref.org/works"
 
@@ -179,8 +237,62 @@ def _text_blocks(blocks: list[PageBlock], page: int) -> list[PageBlock]:
     ]
 
 
+def _is_junk_text(text: str) -> bool:
+    """Похоже на служебный блок (баннер/ссылка/лицензия), а не title/authors."""
+    low = text.lower()
+    return any(marker in low for marker in _JUNK_MARKERS)
+
+
+def _looks_like_masthead(block: PageBlock) -> bool:
+    """Похоже на баннер журнала/метку рубрики у верха страницы, а не заголовок."""
+    text = (block.text or "").strip()
+    if block.bbox.top > 150:
+        return False
+    words = text.split()
+    # Короткий блок у самого верха — обычно аббревиатура/название журнала.
+    if len(words) <= 4 and len(text) < 40:
+        return True
+    # Короткий блок с «журнальным» словом (Journal/Review/Letters/...).
+    lowered = {w.strip(".,:").lower() for w in words}
+    return len(words) <= 6 and bool(lowered & _JOURNAL_WORDS)
+
+
+def _looks_like_person(name: str) -> bool:
+    """Похоже на имя человека: заглавные токены, без служебных слов и мусора."""
+    if _is_junk_text(name):
+        return False
+    tokens = [t for t in name.replace(",", " ").split() if t]
+    if not tokens or len(tokens) > 5:
+        return False
+    capitalized = 0
+    for token in tokens:
+        core = token.strip(".-")
+        if not core or core.lower() in _NAME_PARTICLES:
+            continue
+        if core[:1].isupper():
+            capitalized += 1
+        else:
+            # Строчное слово, не являющееся частицей фамилии — это не имя.
+            return False
+    return capitalized >= 1
+
+
+def _pick_title_block(first_page: list[PageBlock]) -> PageBlock:
+    """Выбирает блок-заголовок: крупнейший шрифт среди не-мусорных, не-баннеров."""
+    candidates = [
+        b
+        for b in first_page
+        if b.text and not _is_junk_text(b.text) and not _looks_like_masthead(b)
+    ]
+    pool = candidates or first_page  # фоллбэк: вернуть хоть что-то
+    return max(pool, key=lambda b: (b.font_size or 0.0, b.is_bold, -b.bbox.top))
+
+
 def guess_title(blocks: list[PageBlock]) -> str:
-    """Эвристика заголовка: самый крупный (и желательно жирный) блок стр. 1.
+    """Эвристика заголовка: крупнейший блок стр. 1 без баннеров/служебки.
+
+    Отсекаются блоки-«мусор» (URL, «View Article Online», лицензии) и баннеры
+    журнала (короткий блок у верха или с «журнальным» словом).
 
     Args:
         blocks: Все блоки документа (выход extractor.get_page_blocks).
@@ -191,12 +303,7 @@ def guess_title(blocks: list[PageBlock]) -> str:
     first_page = _text_blocks(blocks, 1)
     if not first_page:
         return ""
-    # Приоритет: крупный шрифт -> жирность -> выше на странице (меньший top).
-    title_block = max(
-        first_page,
-        key=lambda b: (b.font_size or 0.0, b.is_bold, -b.bbox.top),
-    )
-    return title_block.text or ""
+    return (_pick_title_block(first_page).text or "").strip()
 
 
 def guess_abstract(blocks: list[PageBlock]) -> str | None:
@@ -257,10 +364,7 @@ def guess_authors(blocks: list[PageBlock]) -> list[str]:
     if not first_page:
         return []
 
-    title_block = max(
-        first_page,
-        key=lambda b: (b.font_size or 0.0, b.is_bold, -b.bbox.top),
-    )
+    title_block = _pick_title_block(first_page)
     below = sorted(
         (b for b in first_page if b.bbox.top > title_block.bbox.top),
         key=lambda b: b.bbox.top,
@@ -269,7 +373,9 @@ def guess_authors(blocks: list[PageBlock]) -> list[str]:
         text = (block.text or "").strip()
         if text.lower().startswith(_AUTHOR_STOP_ANCHORS):
             break
-        names = _parse_author_line(text)
+        if _is_junk_text(text):
+            continue
+        names = [n for n in _parse_author_line(text) if _looks_like_person(n)]
         if names:
             return names
     return []
@@ -440,18 +546,32 @@ def extract_metadata(
     source = "pdf"
     confidence = 0.4 if title else 0.2
 
-    # 3. LLM-фоллбэк, если эвристики дали мало (нет заголовка/аннотации/авторов).
-    if use_llm and (not title or abstract is None or not authors):
+    # 3. LLM-фоллбэк, если эвристики дали мало ИЛИ подозрительный результат:
+    #    нет авторов / нет аннотации / заголовок пустой или слишком короткий
+    #    (например, остался баннер журнала, который не отсеяли фильтры).
+    weak_title = not title or len(title) < _MIN_TITLE_LEN
+    if use_llm and (weak_title or abstract is None or not authors):
         first_page_text = "\n".join(b.text or "" for b in _text_blocks(blocks, 1))
         llm = query_llm(first_page_text)
         if llm is not None:
-            title = str(llm.get("title") or title)
-            abstract = llm.get("abstract") or abstract
-            llm_authors = llm.get("authors")
-            if isinstance(llm_authors, list) and llm_authors:
-                authors = [normalize_author(str(a)) for a in llm_authors]
-            source = "hybrid"
-            confidence = 0.6
+            # LLM только ЗАПОЛНЯЕТ пробелы, не перезаписывает удачные эвристики
+            # (модель меньше и склонна привирать авторов/заголовок).
+            used = False
+            if weak_title and llm.get("title"):
+                title = str(llm["title"]).strip()
+                used = True
+            if abstract is None and llm.get("abstract"):
+                abstract = str(llm["abstract"])
+                used = True
+            if not authors and isinstance(llm.get("authors"), list):
+                llm_authors = [
+                    normalize_author(str(a)) for a in llm["authors"] if str(a).strip()
+                ]
+                authors = [a for a in llm_authors if _looks_like_person(a)]
+                used = used or bool(authors)
+            if used:
+                source = "hybrid"
+                confidence = 0.6
 
     return Metadata(
         title=title,
