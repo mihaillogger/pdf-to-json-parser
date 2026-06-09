@@ -8,6 +8,7 @@ import httpx
 
 import parser.metadata as metadata
 from parser.metadata import (
+    _clean_markup,
     extract_metadata,
     find_doi,
     guess_abstract,
@@ -17,6 +18,22 @@ from parser.metadata import (
     normalize_author,
 )
 from parser.schemas import BBox, PageBlock
+
+
+def test_clean_markup_strips_jats_tags() -> None:
+    # JATS small-caps из title CrossRef должен исчезнуть.
+    assert _clean_markup("ir(<scp>iii</scp>) dye") == "ir(iii) dye"
+
+
+def test_clean_markup_unescapes_html_entities() -> None:
+    # HTML-сущности из journal CrossRef должны декодироваться.
+    assert _clean_markup("Crystal Growth &amp; Design") == "Crystal Growth & Design"
+
+
+def test_clean_markup_passthrough_and_none() -> None:
+    assert _clean_markup("Plain Title") == "Plain Title"
+    assert _clean_markup(None) is None
+    assert _clean_markup("") == ""
 
 
 def _block(
