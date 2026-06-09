@@ -3,8 +3,8 @@
 
 Архитектура:
 1. DocLayout-YOLOv10 - пространственная детекция BBox.
-2. PyMuPDF (fitz) - физический кроп изображений (dpi=100 для оптимизации).
-3. LLaVA (через Ollama) - извлечение 2D-массивов таблиц.
+2. PyMuPDF (fitz) - физический кроп изображений (dpi=300 для OCR таблиц).
+3. Qwen2.5-VL (через Ollama) - извлечение 2D-массивов таблиц.
 """
 
 import json
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class VLMTableExtractor:
-    """Извлекатель табличных данных на базе локальной VLM (LLaVA).
+    """Извлекатель табличных данных на базе локальной VLM.
 
     Использует мультимодальную нейросеть для преобразования изображений
     таблиц в структурированный JSON 2D-массив.
@@ -33,11 +33,11 @@ class VLMTableExtractor:
         model_name (str): Название локальной модели для Ollama.
     """
 
-    def __init__(self, model_name: str = "llava") -> None:
+    def __init__(self, model_name: str = "qwen2.5-vl") -> None:
         """Инициализирует экстрактор с указанной моделью.
 
         Args:
-            model_name (str): Имя модели Ollama (по умолчанию "llava").
+            model_name (str): Имя модели Ollama (по умолчанию "qwen2.5-vl").
         """
         self.model_name = model_name
 
@@ -55,18 +55,16 @@ class VLMTableExtractor:
             return []
 
         prompt = (
-            "You are an expert data extraction algorithm. "
-            "Extract tabular data from the image into a JSON 2D array. "
-            "Rules:\n"
-            "1. Output ONLY valid JSON containing a single key 'data' "
-            "with a value of type list[list[string]].\n"
-            "2. No markdown formatting, no explanations.\n"
-            "3. Handle merged header cells by duplicating the text"
-            " or keeping structure intact."
+            "Extract tabular data from this image into a JSON 2D array. "
+            "STRICT RULES:\n"
+            "1. Output ONLY a valid JSON object containing a single key 'data'.\n"
+            "2. The value MUST be a list of lists of STRINGS: [['str', 'str'], ['str', 'str']].\n"
+            "3. If a cell contains a number, wrap it in quotes (e.g., '18', not 18).\n"
+            "4. Absolutely NO markdown formatting, NO explanations, NO ```json blocks."
         )
 
         try:
-            logger.info(f"[VLM] Анализ таблицы: {os.path.basename(image_path)}")
+            logger.info("[VLM] Анализ таблицы: %s", os.path.basename(image_path))
             response = ollama.chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt, "images": [image_path]}],
@@ -74,8 +72,13 @@ class VLMTableExtractor:
                 options={"temperature": 0.0},
             )
 
-            raw_content = response["message"]["content"]
-            parsed_json = json.loads(raw_content)
+            raw_content = response["message"]["content"].strip()
+            
+            # Принудительная зачистка от маркдауна, если модель нарушила промпт
+            cleaned_content = raw_content.strip('`').removeprefix('json').strip()
+            
+            logger.debug("[VLM] Сырой вывод модели: %s", cleaned_content)
+            parsed_json = json.loads(cleaned_content)
 
             # Строгая валидация через Pydantic
             validated_data = TableDataResponse(**parsed_json)
@@ -83,10 +86,19 @@ class VLMTableExtractor:
             return validated_data.data
 
         except ValidationError as e:
-            logger.warning(f"[VLM] Ошибка валидации структуры: {e}")
+            logger.warning(
+                "[VLM] Ошибка валидации структуры (кривой формат):\n%s\nСырой вывод: %s", 
+                e, raw_content
+            )
+            return []
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "[VLM] Нейросеть вернула невалидный JSON: %s\nСырой вывод: %s", 
+                e, raw_content
+            )
             return []
         except Exception as e:
-            logger.error(f"[VLM] Ошибка генерации или сервера Ollama: {e}")
+            logger.error("[VLM] Системная ошибка Ollama: %s", e)
             return []
 
 
@@ -111,7 +123,7 @@ class SpatialExtractor:
         self.output_img_dir = output_img_dir
         os.makedirs(self.output_img_dir, exist_ok=True)
 
-        self.vlm = VLMTableExtractor(model_name="llava")
+        self.vlm = VLMTableExtractor(model_name="qwen2.5-vl")
 
         logger.info("Загрузка весов DocLayout-YOLO")
         model_path = hf_hub_download(
@@ -192,7 +204,8 @@ class SpatialExtractor:
                     fig_counter += 1
 
                 elif class_name == "table":
-                    pix = page.get_pixmap(clip=rect, dpi=100)
+                    # Жесткое требование архитектуры: 300 DPI для VLM
+                    pix = page.get_pixmap(clip=rect, dpi=300)
                     img_filename = f"table_{tab_counter}_p{page_num + 1}.png"
                     img_path = os.path.join(self.output_img_dir, img_filename)
                     pix.save(img_path)
