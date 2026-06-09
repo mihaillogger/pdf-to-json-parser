@@ -1,4 +1,6 @@
 import concurrent.futures
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz
@@ -10,6 +12,92 @@ from parser.figures import SpatialExtractor
 from parser.metadata import extract_metadata
 from parser.schemas import Document, Equation, Figure, PageBlock, Table
 from parser.sections import build_section_tree
+
+#: Обязательные поля (ТЗ 8.1): если какое-то пусто — статус «частичный успех».
+_REQUIRED_FIELDS = ("title", "authors", "abstract", "doi", "sections", "raw_text")
+
+
+@dataclass
+class DocStatus:
+    """Результат обработки одного документа."""
+
+    name: str
+    status: str  # "success" | "partial" | "error" | "skipped"
+    seconds: float = 0.0
+    missing: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass
+class BatchSummary:
+    """Агрегированная сводка по пакетной обработке."""
+
+    total: int = 0
+    success: int = 0
+    partial: int = 0
+    errors: int = 0
+    skipped: int = 0
+    total_seconds: float = 0.0
+    avg_seconds: float = 0.0
+
+
+def _missing_required(doc: Document) -> list[str]:
+    """Возвращает список обязательных полей, оставшихся пустыми."""
+    meta = doc.metadata
+    values: dict[str, object] = {
+        "title": (meta.title or "").strip(),
+        "authors": meta.authors,
+        "abstract": meta.abstract,
+        "doi": meta.doi,
+        "sections": doc.sections,
+        "raw_text": (doc.raw_text or "").strip(),
+    }
+    return [name for name in _REQUIRED_FIELDS if not values[name]]
+
+
+def log_doc_status(status: DocStatus) -> None:
+    """Логирует статус по одному документу (ТЗ 5.3.1)."""
+    if status.status == "success":
+        logger.success(f"[OK] {status.name} ({status.seconds:.1f}s)")
+    elif status.status == "partial":
+        fields = ", ".join(status.missing)
+        logger.warning(
+            f"[ЧАСТИЧНО] {status.name} ({status.seconds:.1f}s) — пустые поля: {fields}"
+        )
+    elif status.status == "error":
+        logger.error(f"[ОШИБКА] {status.name}: {status.error}")
+    else:
+        logger.info(f"[ПРОПУСК] {status.name}: JSON уже существует")
+
+
+def summarize(results: list[DocStatus], total_seconds: float) -> BatchSummary:
+    """Считает агрегаты по списку результатов (ТЗ 5.3.2)."""
+    processed = [r for r in results if r.status in ("success", "partial", "error")]
+    avg = sum(r.seconds for r in processed) / len(processed) if processed else 0.0
+    return BatchSummary(
+        total=len(results),
+        success=sum(1 for r in results if r.status == "success"),
+        partial=sum(1 for r in results if r.status == "partial"),
+        errors=sum(1 for r in results if r.status == "error"),
+        skipped=sum(1 for r in results if r.status == "skipped"),
+        total_seconds=total_seconds,
+        avg_seconds=avg,
+    )
+
+
+def _log_summary(summary: BatchSummary) -> None:
+    """Печатает финальную сводку пакетной обработки."""
+    logger.info("=" * 60)
+    logger.info(
+        f"ИТОГ: всего={summary.total}, успешно={summary.success}, "
+        f"частично={summary.partial}, ошибок={summary.errors}, "
+        f"пропущено={summary.skipped}"
+    )
+    logger.info(
+        f"Время: общее={summary.total_seconds:.1f}s, "
+        f"среднее/документ={summary.avg_seconds:.1f}s"
+    )
+    logger.info("=" * 60)
 
 
 def enrich_equations_context(
@@ -58,22 +146,34 @@ def process_single_file(
     use_crossref: bool = True,
     use_llm: bool = True,
     extract_images: bool = True,
-) -> None:
-    """Полный цикл парсинга одного PDF документа."""
+) -> DocStatus:
+    """Полный цикл парсинга одного PDF документа.
+
+    Returns:
+        DocStatus: статус обработки (success/partial/error/skipped), список
+        неизвлечённых обязательных полей и время обработки.
+    """
+    name = pdf_path.name
+    start = time.perf_counter()
     json_path = output_dir / f"{pdf_path.stem}.json"
 
     if json_path.exists() and not overwrite:
-        logger.info(f"Пропуск {pdf_path.name}: JSON уже существует.")
-        return
+        logger.info(f"Пропуск {name}: JSON уже существует.")
+        return DocStatus(name=name, status="skipped")
 
-    logger.info(f"Начало обработки: {pdf_path.name}")
+    logger.info(f"Начало обработки: {name}")
 
     try:
         # 1. Базовый I/O
         blocks = get_page_blocks(str(pdf_path))
         if not blocks:
-            logger.error(f"Файл {pdf_path.name} пуст или не содержит текста.")
-            return
+            logger.error(f"Файл {name} пуст или не содержит текста.")
+            return DocStatus(
+                name=name,
+                status="error",
+                seconds=time.perf_counter() - start,
+                error="пустой документ или нет текстового слоя",
+            )
 
         # raw_text для JSON-поля (ТЗ 4.8): колоночный порядок из блоков — чище,
         # без артефактов вёрстки.
@@ -155,11 +255,26 @@ def process_single_file(
         with open(json_path, "w", encoding="utf-8") as f:
             f.write(doc.model_dump_json(indent=2))
 
+        elapsed = time.perf_counter() - start
+        missing = _missing_required(doc)
+        if missing:
+            logger.warning(f"{name}: частичный успех, пустые поля: {missing}")
+            return DocStatus(
+                name=name, status="partial", seconds=elapsed, missing=missing
+            )
         logger.success(f"Документ успешно собран: {json_path.name}")
+        return DocStatus(name=name, status="success", seconds=elapsed)
 
     except Exception as e:
-        logger.error(f"Критическая ошибка при обработке {pdf_path.name}: {e}")
+        # Падение одного документа не прерывает пакет (ТЗ 5.4); трейс — в run.log.
+        logger.error(f"Критическая ошибка при обработке {name}: {e}")
         logger.exception("Полный traceback:")
+        return DocStatus(
+            name=name,
+            status="error",
+            seconds=time.perf_counter() - start,
+            error=str(e),
+        )
 
 
 def process_directory(
@@ -181,20 +296,35 @@ def process_directory(
 
     logger.info(f"Найдено файлов: {len(pdf_files)}. Запуск {workers} воркеров.")
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(
-                process_single_file,
-                pdf,
-                output_dir,
-                overwrite,
-                offline,
-                use_crossref,
-                use_llm,
+    results: list[DocStatus] = []
+    batch_start = time.perf_counter()
+
+    if workers <= 1:
+        # Последовательно в главном процессе — статусы гарантированно идут в run.log.
+        for pdf in pdf_files:
+            status = process_single_file(
+                pdf, output_dir, overwrite, offline, use_crossref, use_llm,
                 extract_images,
             )
-            for pdf in pdf_files
-        ]
-        concurrent.futures.wait(futures)
+            log_doc_status(status)
+            results.append(status)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    process_single_file, pdf, output_dir, overwrite, offline,
+                    use_crossref, use_llm, extract_images,
+                ): pdf
+                for pdf in pdf_files
+            }
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    status = future.result()
+                except Exception as exc:  # воркер упал на уровне процесса
+                    pdf = futures[future]
+                    status = DocStatus(name=pdf.name, status="error", error=str(exc))
+                log_doc_status(status)
+                results.append(status)
 
+    _log_summary(summarize(results, time.perf_counter() - batch_start))
     logger.info("Пакетная обработка директории завершена.")
