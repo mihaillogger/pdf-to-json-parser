@@ -56,8 +56,8 @@ class VLMTableExtractor:
             )
 
             raw_content = response["message"]["content"].strip()
-            cleaned = raw_content.strip('`').removeprefix('json').strip()
-            
+            cleaned = raw_content.strip("`").removeprefix("json").strip()
+
             parsed_json = json.loads(cleaned)
             return TableDataResponse(**parsed_json).data
 
@@ -103,20 +103,47 @@ class SpatialExtractor:
                     continue
 
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
-                bbox = BBox(left=round(x1, 2), top=round(y1, 2), right=round(x2, 2), bottom=round(y2, 2))
+                bbox = BBox(
+                    left=round(x1, 2),
+                    top=round(y1, 2),
+                    right=round(x2, 2),
+                    bottom=round(y2, 2),
+                )
                 rect = fitz.Rect(x1, y1, x2, y2)
 
                 if class_name in ["figure", "image"]:
-                    path = os.path.join(self.output_img_dir, f"fig_{fig_cnt}_p{page_num+1}.png")
+                    path = os.path.join(
+                        self.output_img_dir, f"fig_{fig_cnt}_p{page_num + 1}.png"
+                    )
                     page.get_pixmap(clip=rect, dpi=150).save(path)
-                    figures.append(Figure(id=f"Figure {fig_cnt}", caption="", page=page_num+1, 
-                                          bbox=bbox, img_path=path, panels=[Panel(bbox=bbox, img_path=path)]))
+                    figures.append(
+                        Figure(
+                            id=f"Figure {fig_cnt}",
+                            caption="",
+                            page=page_num + 1,
+                            bbox=bbox,
+                            img_path=path,
+                            panels=[Panel(bbox=bbox, img_path=path)],
+                        )
+                    )
                     fig_cnt += 1
                 else:
-                    path = os.path.join(self.output_img_dir, f"tab_{tab_cnt}_p{page_num+1}.png")
-                    page.get_pixmap(clip=rect, dpi=300).save(path) # 300 DPI для качества!
-                    tables.append(Table(id=f"Table {tab_cnt}", caption="", page=page_num+1, 
-                                        bbox=bbox, img_path=path, data=self.vlm.extract_2d_array(path)))
+                    path = os.path.join(
+                        self.output_img_dir, f"tab_{tab_cnt}_p{page_num + 1}.png"
+                    )
+                    page.get_pixmap(clip=rect, dpi=300).save(
+                        path
+                    )  # 300 DPI для качества!
+                    tables.append(
+                        Table(
+                            id=f"Table {tab_cnt}",
+                            caption="",
+                            page=page_num + 1,
+                            bbox=bbox,
+                            img_path=path,
+                            data=self.vlm.extract_2d_array(path),
+                        )
+                    )
                     tab_cnt += 1
 
         doc.close()

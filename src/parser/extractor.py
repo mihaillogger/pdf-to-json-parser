@@ -1,6 +1,6 @@
 from typing import Any
 
-import fitz  # type: ignore
+import fitz
 from loguru import logger
 
 from parser.schemas import BBox, PageBlock
