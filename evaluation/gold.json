@@ -26,7 +26,8 @@
     ],
     "doi": "10.1039/d2cs00172a",
     "year": 2023,
-    "journal": "Chemical Society Reviews"
+    "journal": "Chemical Society Reviews",
+    "abstract": "Oxidative stress is closely related to the physiopathology of numerous diseases. Reactive oxygen species (ROS), reactive nitrogen species (RNS), and reactive sulfur species (RSS) are direct participants and important biomarkers of oxidative stress."
   },
   "Статья 3.pdf": {
     "title": "Preparation of fibrous polymer grafted magnetic chitosan beads and modified with hydrazone and imidazole groups: isolation of U(VI) ions from seawater",
@@ -39,6 +40,7 @@
     ],
     "doi": "10.1007/s10967-025-10065-7",
     "year": 2025,
-    "journal": "Journal of Radioanalytical and Nuclear Chemistry"
+    "journal": "Journal of Radioanalytical and Nuclear Chemistry",
+    "abstract": "The magnetic chitosan beads were prepared and grafted with glycidylmethacrylate, then diaminomelanonitrile (DAMN) was attached. The nitrile groups of DAMN were reacted with hydrazine hydrate hydrochloride and hydrazine hydrate-ethylene diamine to obtain hydrazine (HYD) and imidazole (IMDZ) groups, respectively. Both adsorbents removed uranyl ions from the aqueous medium and seawater. The adsorption capacities of the Fe₃O₄@CHT@p(GMA)-HYD and Fe₃O₄@CHT@p(GMA)-IMDZ, beads were 328.4 and 434.7 mg/g, respectively. Both adsorbents have high performance for adsorbing U(VI) ions from seawater. The synthesized adsorbents were used to isolate U(VI) ions from seawater in the presence of various ions."
   }
 }

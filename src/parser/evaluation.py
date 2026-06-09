@@ -1,23 +1,50 @@
-"""Оценка качества извлечения метаданных: precision / recall / F1.
+"""Оценка качества извлечения на отложенной выборке: precision / recall / F1.
 
-Сравнивает предсказанные метаданные с эталонными («золотая» разметка: CrossRef
-по DOI + ручная проверка) и считает метрики по основным полям ТЗ:
-title, authors, doi, year, journal.
+Сравнивает предсказанный парсером результат с эталонной («золотой») разметкой
+и считает метрики по основным полям итогового JSON (ТЗ, доп. баллы 8.3.6).
+Покрываются не только метаданные, но и остальные части документа:
 
-- Скалярные поля (title/doi/year/journal): precision = доля верных среди
-  заполненных нами; recall = доля верных среди тех, где эталон непуст.
-- authors: множественное поле -> per-doc P/R/F1 по фамилиям, усреднение (macro).
+- Скалярные поля (title/journal/abstract): нечёткое сравнение (вложенность строк);
+  doi/year — строгое. precision = доля верных среди заполненных нами,
+  recall = доля верных среди тех, где эталон непуст.
+- Множественные поля (authors/keywords/sections): per-doc P/R/F1 по множествам
+  (фамилии авторов, нормализованные ключевые слова, заголовки секций) с
+  macro-усреднением по документам.
+- Счётные поля (figures/tables/equations): сравнение количества извлечённых
+  элементов с эталоном (recall = найдено/эталон, precision = найдено/предсказано).
+
+Поле попадает в отчёт, если оно базовое (title/doi/year/journal/authors) либо
+если эталон содержит для него непустое значение хотя бы в одном документе —
+поэтому частичная gold-разметка (например, только метаданные) тоже работает.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-#: Поля, по которым считаем метрики.
-SCALAR_FIELDS = ("title", "doi", "year", "journal")
+#: Скалярные поля и режим сравнения (fuzzy=вложенность строк допустима).
+SCALAR_FIELDS: dict[str, bool] = {
+    "title": True,
+    "doi": False,
+    "year": False,
+    "journal": True,
+    "abstract": True,
+}
+
+#: Множественные поля -> функция нормализации одного элемента.
+SET_FIELDS: dict[str, Callable[[str], str]] = {}
+
+#: Счётные поля (сравнение количества элементов).
+COUNT_FIELDS: tuple[str, ...] = ("figures", "tables", "equations")
+
+#: Поля, которые показываем всегда (даже при нулевом support) — для совместимости.
+CORE_FIELDS: frozenset[str] = frozenset(
+    {"title", "doi", "year", "journal", "authors"}
+)
 
 
 def _norm(value: Any) -> str:
@@ -36,6 +63,16 @@ def _surname(author: str) -> str:
     return _norm(head)
 
 
+#: authors сравниваем по фамилиям, keywords/sections — по полной нормализации.
+SET_FIELDS.update(
+    {
+        "authors": _surname,
+        "keywords": _norm,
+        "sections": _norm,
+    }
+)
+
+
 def scalar_match(pred: Any, gold: Any, *, fuzzy: bool) -> bool:
     """Совпадение скалярного поля. fuzzy=True допускает вложенность строк."""
     np, ng = _norm(pred), _norm(gold)
@@ -46,10 +83,12 @@ def scalar_match(pred: Any, gold: Any, *, fuzzy: bool) -> bool:
     return fuzzy and (np in ng or ng in np)
 
 
-def authors_prf(pred: list[str], gold: list[str]) -> tuple[float, float, float]:
-    """Precision/Recall/F1 по множествам фамилий авторов одного документа."""
-    pred_set = {s for s in (_surname(a) for a in pred) if s}
-    gold_set = {s for s in (_surname(a) for a in gold) if s}
+def set_prf(
+    pred: Iterable[str], gold: Iterable[str], normalizer: Callable[[str], str]
+) -> tuple[float, float, float]:
+    """Precision/Recall/F1 по множествам элементов одного документа."""
+    pred_set = {n for n in (normalizer(x) for x in pred) if n}
+    gold_set = {n for n in (normalizer(x) for x in gold) if n}
     if not pred_set and not gold_set:
         return 1.0, 1.0, 1.0
     if not pred_set or not gold_set:
@@ -60,6 +99,29 @@ def authors_prf(pred: list[str], gold: list[str]) -> tuple[float, float, float]:
     denom = precision + recall
     f1 = 0.0 if denom == 0 else 2 * precision * recall / denom
     return precision, recall, f1
+
+
+def authors_prf(pred: list[str], gold: list[str]) -> tuple[float, float, float]:
+    """Precision/Recall/F1 по множествам фамилий авторов одного документа."""
+    return set_prf(pred, gold, _surname)
+
+
+def section_headings(sections: Any) -> list[str]:
+    """Рекурсивно собирает заголовки из дерева секций (list[Section|dict])."""
+    headings: list[str] = []
+    for sec in sections or []:
+        heading = sec.get("heading") if isinstance(sec, dict) else getattr(
+            sec, "heading", None
+        )
+        if heading:
+            headings.append(str(heading))
+        subs = (
+            sec.get("subsections")
+            if isinstance(sec, dict)
+            else getattr(sec, "subsections", None)
+        )
+        headings.extend(section_headings(subs))
+    return headings
 
 
 @dataclass
@@ -94,63 +156,104 @@ class Report:
         }
 
 
-def _get(meta: Any, name: str) -> Any:
-    """Достаёт поле из dict или pydantic-объекта Metadata."""
-    return meta.get(name) if isinstance(meta, dict) else getattr(meta, name, None)
+def _get(obj: Any, name: str) -> Any:
+    """Достаёт поле из dict или pydantic-объекта."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def _is_empty(value: Any) -> bool:
+    """Пустое значение эталона/предсказания (None, '', [], 0 для счётчиков)."""
+    return value in (None, "", [], {})
+
+
+def _f1(precision: float, recall: float) -> float:
+    denom = precision + recall
+    return 0.0 if denom == 0 else 2 * precision * recall / denom
+
+
+def _score_scalar(predictions: list[Any], golds: list[Any], name: str) -> FieldScore:
+    fuzzy = SCALAR_FIELDS[name]
+    predicted = correct = support = 0
+    for pred, gold in zip(predictions, golds):
+        pv, gv = _get(pred, name), _get(gold, name)
+        if not _is_empty(gv):
+            support += 1
+        if not _is_empty(pv):
+            predicted += 1
+            if scalar_match(pv, gv, fuzzy=fuzzy):
+                correct += 1
+    precision = correct / predicted if predicted else 0.0
+    recall = correct / support if support else 0.0
+    return FieldScore(precision, recall, _f1(precision, recall), support)
+
+
+def _score_set(predictions: list[Any], golds: list[Any], name: str) -> FieldScore:
+    normalizer = SET_FIELDS[name]
+    sums = [0.0, 0.0, 0.0]
+    support = 0
+    for pred, gold in zip(predictions, golds):
+        gold_items = _get(gold, name) or []
+        if not gold_items:
+            continue
+        support += 1
+        p, r, f = set_prf(_get(pred, name) or [], gold_items, normalizer)
+        sums[0] += p
+        sums[1] += r
+        sums[2] += f
+    if not support:
+        return FieldScore(0.0, 0.0, 0.0, 0)
+    return FieldScore(sums[0] / support, sums[1] / support, sums[2] / support, support)
+
+
+def _score_count(predictions: list[Any], golds: list[Any], name: str) -> FieldScore:
+    sums = [0.0, 0.0, 0.0]
+    support = 0
+    for pred, gold in zip(predictions, golds):
+        gv = _get(gold, name)
+        if gv is None:
+            continue
+        gold_n = int(gv)
+        if gold_n <= 0:
+            continue
+        support += 1
+        pred_n = int(_get(pred, name) or 0)
+        tp = min(pred_n, gold_n)
+        precision = tp / pred_n if pred_n else 0.0
+        recall = tp / gold_n
+        sums[0] += precision
+        sums[1] += recall
+        sums[2] += _f1(precision, recall)
+    if not support:
+        return FieldScore(0.0, 0.0, 0.0, 0)
+    return FieldScore(sums[0] / support, sums[1] / support, sums[2] / support, support)
 
 
 def evaluate(predictions: list[Any], golds: list[Any]) -> Report:
     """Считает метрики по корпусу.
 
     Args:
-        predictions: список предсказанных метаданных (dict или Metadata).
-        golds: список эталонных метаданных в том же порядке.
+        predictions: список предсказаний (dict или объект с нужными атрибутами).
+        golds: список эталонов в том же порядке.
 
     Returns:
-        :class:`Report` с метриками по каждому полю.
+        :class:`Report` с метриками по каждому полю. Поле включается, если оно
+        базовое (CORE_FIELDS) либо имеет ненулевой support в эталоне.
     """
     if len(predictions) != len(golds):
         raise ValueError("predictions и golds должны быть одной длины")
 
     report = Report(documents=len(golds))
 
-    for fname in SCALAR_FIELDS:
-        predicted = correct = support = 0
-        fuzzy = fname in ("title", "journal")
-        for pred, gold in zip(predictions, golds):
-            pv, gv = _get(pred, fname), _get(gold, fname)
-            if gv not in (None, "", []):
-                support += 1
-            if pv not in (None, "", []):
-                predicted += 1
-                if scalar_match(pv, gv, fuzzy=fuzzy):
-                    correct += 1
-        precision = correct / predicted if predicted else 0.0
-        recall = correct / support if support else 0.0
-        f1 = (
-            0.0
-            if precision + recall == 0
-            else 2 * precision * recall / (precision + recall)
-        )
-        report.fields[fname] = FieldScore(precision, recall, f1, support)
+    scorers: list[tuple[str, FieldScore]] = []
+    for name in SCALAR_FIELDS:
+        scorers.append((name, _score_scalar(predictions, golds, name)))
+    for name in SET_FIELDS:
+        scorers.append((name, _score_set(predictions, golds, name)))
+    for name in COUNT_FIELDS:
+        scorers.append((name, _score_count(predictions, golds, name)))
 
-    # authors — macro-усреднение по документам, где эталон непуст.
-    sums = [0.0, 0.0, 0.0]
-    support = 0
-    for pred, gold in zip(predictions, golds):
-        gold_authors = _get(gold, "authors") or []
-        if not gold_authors:
-            continue
-        support += 1
-        p, r, f = authors_prf(_get(pred, "authors") or [], gold_authors)
-        sums[0] += p
-        sums[1] += r
-        sums[2] += f
-    if support:
-        report.fields["authors"] = FieldScore(
-            sums[0] / support, sums[1] / support, sums[2] / support, support
-        )
-    else:
-        report.fields["authors"] = FieldScore(0.0, 0.0, 0.0, 0)
+    for name, score in scorers:
+        if name in CORE_FIELDS or score.support > 0:
+            report.fields[name] = score
 
     return report
