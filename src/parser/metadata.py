@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from datetime import date
 from typing import Any
 
@@ -25,6 +26,9 @@ from parser.schemas import Metadata, PageBlock
 
 #: Канонический DOI: 10.<регистрант>/<суффикс>.
 DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+", re.IGNORECASE)
+
+#: Якорь «это DOI самой статьи»: ссылка/метка непосредственно перед DOI.
+_DOI_ANCHOR_RE = re.compile(r"(?:doi\.org/|dx\.doi\.org/|doi:?\s*)$", re.IGNORECASE)
 
 #: Год публикации (4 цифры, разумный диапазон).
 YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -92,21 +96,47 @@ _LLM_SYSTEM_PROMPT = (
 )
 
 
+def _is_placeholder_doi(doi: str) -> bool:
+    """Отсекает шаблонные DOI-заглушки (напр. RSC ``10.1039/b000000x``)."""
+    suffix = doi.split("/", 1)[1] if "/" in doi else doi
+    return bool(re.search(r"0{5,}", suffix)) or "xxxx" in suffix
+
+
 def find_doi(text: str) -> str | None:
-    """Находит первый DOI в тексте и приводит к каноническому виду.
+    """Находит DOI самой статьи среди всех DOI в тексте.
+
+    В научных статьях, помимо собственного DOI, встречаются DOI цитируемых работ
+    (список литературы). Поэтому не берём первый попавшийся, а выбираем по сигналам:
+    приоритет — у DOI рядом с якорем (``doi.org/``, ``doi:``); среди них (или среди
+    всех, если якорей нет) — самый частый (свой повторяется в колонтитулах/
+    строке цитирования), при равенстве — самый ранний по тексту. Шаблоны-заглушки
+    отсеиваются.
 
     Args:
-        text: Текст для поиска (приоритетно — текст титульной страницы).
+        text: Текст для поиска (приоритетно — титульная страница / front matter).
 
     Returns:
         DOI в нижнем регистре без хвостовой пунктуации либо ``None``.
     """
-    match = DOI_RE.search(text)
-    if match is None:
+    anchored: list[tuple[str, int]] = []
+    everything: list[tuple[str, int]] = []
+    for match in DOI_RE.finditer(text):
+        doi = match.group(0).rstrip(_DOI_TRAILING).lower()
+        if _is_placeholder_doi(doi):
+            continue
+        everything.append((doi, match.start()))
+        if _DOI_ANCHOR_RE.search(text[max(0, match.start() - 10) : match.start()]):
+            anchored.append((doi, match.start()))
+
+    pool = anchored or everything
+    if not pool:
         return None
-    doi = match.group(0).rstrip(_DOI_TRAILING).lower()
-    logger.debug(f"Найден DOI: {doi}")
-    return doi
+
+    counts = Counter(doi for doi, _ in pool)
+    # Самый частый DOI; при равенстве — самый ранний по позиции в тексте.
+    best_doi = min(pool, key=lambda item: (-counts[item[0]], item[1]))[0]
+    logger.debug(f"Выбран DOI: {best_doi} (кандидатов: {len(everything)})")
+    return best_doi
 
 
 def normalize_author(name: str) -> str:

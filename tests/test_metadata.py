@@ -59,6 +59,32 @@ def test_find_doi_absent() -> None:
     assert find_doi("В этом тексте нет идентификатора публикации") is None
 
 
+def test_find_doi_prefers_own_over_cited() -> None:
+    # Свой DOI в шапке + повтор в футере; чужие — по разу в списке литературы.
+    text = (
+        "Article. https://doi.org/10.1016/j.own.2025.001\n"
+        "Body text...\n"
+        "References\n"
+        "[1] Smith et al. https://doi.org/10.1111/cited.2010.999\n"
+        "[2] Jones et al. https://doi.org/10.2222/cited.2011.888\n"
+        "Footer https://doi.org/10.1016/j.own.2025.001\n"
+    )
+    assert find_doi(text) == "10.1016/j.own.2025.001"
+
+
+def test_find_doi_prefers_anchored() -> None:
+    # Без повторов: DOI у якоря doi.org предпочтительнее голого в теле.
+    text = "ref 10.9999/loose.body.ref ... official doi.org/10.1016/j.real.2024.42"
+    assert find_doi(text) == "10.1016/j.real.2024.42"
+
+
+def test_find_doi_skips_placeholder() -> None:
+    # Шаблон-заглушка RSC не должен выбираться, если есть настоящий DOI.
+    text = "DOI: 10.1039/b000000x ... real one https://doi.org/10.1039/d2cs00172a"
+    assert find_doi("10.1039/b000000x") is None
+    assert find_doi(text) == "10.1039/d2cs00172a"
+
+
 # --- normalize_author ---
 
 
