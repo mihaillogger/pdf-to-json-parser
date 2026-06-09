@@ -1,0 +1,101 @@
+"""Тесты модуля метрик качества (parser.evaluation)."""
+
+from __future__ import annotations
+
+from parser.evaluation import authors_prf, evaluate, scalar_match
+
+
+def test_scalar_match_exact_and_normalized() -> None:
+    assert scalar_match("Hello World", "hello  world", fuzzy=False)
+    assert scalar_match("10.1016/J.X", "10.1016/j.x", fuzzy=False)
+    assert not scalar_match(None, "x", fuzzy=True)
+    assert not scalar_match("x", "", fuzzy=True)
+
+
+def test_scalar_match_fuzzy_containment() -> None:
+    # Заголовок-обрезок засчитывается при fuzzy (вложенность).
+    assert scalar_match(
+        "A novel image analysis methodology",
+        "A novel image analysis methodology for online monitoring",
+        fuzzy=True,
+    )
+    assert not scalar_match(
+        "A novel image analysis methodology",
+        "A novel image analysis methodology for online monitoring",
+        fuzzy=False,
+    )
+
+
+def test_authors_prf_perfect() -> None:
+    p, r, f = authors_prf(["Yao, Yunjin", "Liu, Yating"], ["Yao, Y.", "Liu, Y."])
+    assert (p, r, f) == (1.0, 1.0, 1.0)
+
+
+def test_authors_prf_partial() -> None:
+    # Предсказали 1 из 2 авторов, без лишних -> P=1.0, R=0.5.
+    p, r, _ = authors_prf(["Yao, Yunjin"], ["Yao, Y.", "Liu, Y."])
+    assert p == 1.0
+    assert r == 0.5
+
+
+def test_authors_prf_with_false_positive() -> None:
+    # 1 верный + 1 лишний -> P=0.5, R=1.0.
+    p, r, _ = authors_prf(["Yao, Yunjin", "Ghost, Person"], ["Yao, Y."])
+    assert p == 0.5
+    assert r == 1.0
+
+
+def test_evaluate_report_scalars_and_authors() -> None:
+    preds = [
+        {
+            "title": "A Study of Catalysts",
+            "doi": "10.1/x",
+            "year": 2025,
+            "journal": "Chem Sci",
+            "authors": ["Smith, John"],
+        },
+        {
+            "title": "Wrong Title",
+            "doi": None,
+            "year": 2020,
+            "journal": None,
+            "authors": [],
+        },
+    ]
+    golds = [
+        {
+            "title": "A Study of Catalysts",
+            "doi": "10.1/x",
+            "year": 2025,
+            "journal": "Chemical Science",
+            "authors": ["Smith, J."],
+        },
+        {
+            "title": "Real Second Title",
+            "doi": "10.2/y",
+            "year": 2020,
+            "journal": "Nature",
+            "authors": ["Doe, Jane"],
+        },
+    ]
+
+    report = evaluate(preds, golds)
+
+    assert report.documents == 2
+    doi = report.fields["doi"]
+    # doi: заполнили 1, верный 1 -> P=1.0; эталонов 2 -> R=0.5
+    assert doi.precision == 1.0
+    assert doi.recall == 0.5
+    # year: оба верные -> P=R=1.0
+    assert report.fields["year"].precision == 1.0
+    assert report.fields["year"].recall == 1.0
+    # authors: doc1 идеально, doc2 пусто (0) -> macro recall = 0.5
+    assert report.fields["authors"].support == 2
+    assert report.fields["authors"].recall == 0.5
+
+
+def test_evaluate_length_mismatch_raises() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        evaluate([{}], [{}, {}])

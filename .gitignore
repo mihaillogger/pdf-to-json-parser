@@ -18,3 +18,5 @@ training/datasets/
 
 .DS_Store
 Thumbs.db
+# Эталонная разметка для метрик (нужна в репозитории)
+!evaluation/gold.json
