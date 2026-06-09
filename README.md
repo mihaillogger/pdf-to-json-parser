@@ -311,9 +311,9 @@ Pix2Tex (LaTeX-OCR), Tesseract (`eng+rus`). Все модели работают
 |---|---|
 | **Ильенков Матвей** | извлечение текста ([`extractor.py`](src/parser/extractor.py)): колонки, зонирование |
 | **Корняков Роман** | дерево секций ([`sections.py`](src/parser/sections.py)), Docker, веб-интерфейс |
-| **Фёдоров Арсений** | фигуры и таблицы ([`figures.py`](src/parser/figures.py)), уравнения ([`equations.py`](src/parser/equations.py)) |
+| **Фёдоров Арсений** | фигуры и таблицы ([`figures.py`](src/parser/figures.py)), уравнения ([`equations.py`](src/parser/equations.py)), метрики качества |
 | **Позин Михаил** | инфраструктура: GitHub/CI, оркестратор ([`pipeline.py`](src/parser/pipeline.py)), CLI ([`cli.py`](src/parser/cli.py)) |
-| **Бобченок Арсений** | метаданные и ML ([`metadata.py`](src/parser/metadata.py)): каскад DOI/CrossRef/LLM, OCR-фоллбэк, метрики качества |
+| **Бобченок Арсений** | метаданные и ML ([`metadata.py`](src/parser/metadata.py)): каскад DOI/CrossRef/LLM, OCR-фоллбэк |
 
 ---
 
