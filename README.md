@@ -199,12 +199,14 @@ uv run python scripts/eval_pipeline.py --pred-dir out/ --gold evaluation/gold.js
 
 ---
 
-## 📝 Разработка
+## � Команда
 
-Перед PR убедитесь, что всё проходит:
+| Участник | Зона ответственности |
+| --- | --- |
+| **Матвей Ильенков** | `extractor.py`: Извлечение текста, обработка колонок, зонирование |
+| **Роман Корняков** | `sections.py`: Дерево секций, Docker-инфраструктура, Web-интерфейс |
+| **Арсений Фёдоров** | `figures.py`, `equations.py`: Детекция фигур/таблиц/уравнений, скрипты оценки качества |
+| **Михаил Позин** | `pipeline.py`, `cli.py`: Архитектура пайплайна, CLI, интеграция CI/CD |
+| **Арсений Бобченок** | `metadata.py`, `ocr.py`: Каскад DOI/CrossRef/LLM, OCR-фоллбэк |
 
-```bash
-uv run ruff check .
-uv run mypy src/ tests/
-uv run pytest
-```
+---
