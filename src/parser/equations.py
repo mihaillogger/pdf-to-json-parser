@@ -69,9 +69,8 @@ class EquationExtractor:
         Returns:
             str: Очищенная LaTeX строка.
         """
-        # Убираем только дикий визуальный мусор перед номерами, сами номера не трогаем
         cleaned = re.sub(
-            r"(?:~|\\quad|\\qquad|\\ |\\!|\\,)+(\(\d+\)|\\tag\{\d+\})$",
+            r"(?:\s|~|\\quad|\\qquad|\\[ ,;!])+(\(\d+\)|\\tag\{\d+\})$",
             r" \1",
             raw_latex,
         )
