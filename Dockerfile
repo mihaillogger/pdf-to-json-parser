@@ -11,9 +11,11 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY . .
+
+RUN uv sync --frozen --no-dev
 
 RUN chmod +x entrypoint.sh start.sh
 
