@@ -101,7 +101,8 @@ def test_full_pipeline_integration(tmp_path: Path) -> None:
     assert data["metadata"]["title"] == "A Great Scientific Paper"
     assert data["metadata"]["doi"] == "10.1234/test.123"
 
-    assert len(data["sections"]) == 1
-    assert data["sections"][0]["heading"] == "1. Introduction"
-    assert "Some intro text" in data["sections"][0]["content"]
+    assert len(data["sections"]) == 2
+    assert data["sections"][0]["heading"] == "A Great Scientific Paper"
+    assert data["sections"][1]["heading"] == "1. Introduction"
+    assert "Some intro text" in data["sections"][1]["content"]
     assert data["raw_text"] is not None

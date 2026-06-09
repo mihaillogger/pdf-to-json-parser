@@ -1,8 +1,13 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-rus \
+    ghostscript \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
