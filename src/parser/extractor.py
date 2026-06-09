@@ -230,4 +230,17 @@ class PDFExtractor:
 
 
 def get_page_blocks(filepath: str) -> list[PageBlock]:
-    return PDFExtractor(filepath).extract()
+    """Извлекает блоки PDF; при отсутствии текстового слоя — OCR-фоллбэк."""
+    blocks = PDFExtractor(filepath).extract()
+
+    # Нет ни одного текстового блока — вероятно скан без текстового слоя.
+    if not any(b.block_type == "text" and b.text for b in blocks):
+        from parser.ocr import ocr_pdf
+
+        ocr_blocks = ocr_pdf(filepath)
+        if ocr_blocks:
+            logger.info(f"Текстовый слой отсутствует, применён OCR: {filepath}")
+            # Сохраняем картиночные блоки экстрактора + добавляем распознанный текст.
+            blocks = blocks + ocr_blocks
+
+    return blocks
