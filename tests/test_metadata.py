@@ -495,3 +495,18 @@ def test_extract_metadata_llm_does_not_overwrite_good_heuristics(
     assert meta.title == "A Detailed Investigation of Catalyst Surfaces"
     assert meta.authors == ["Smith, John", "Doe, Jane"]
     assert meta.abstract == "Filled abstract from LLM."
+
+
+def test_ollama_url_overridable_by_env(monkeypatch: Any) -> None:
+    # В Docker localhost недоступен — URL должен переопределяться через окружение.
+    import importlib
+
+    monkeypatch.setenv("OLLAMA_URL", "http://host.docker.internal:11434/api/chat")
+    try:
+        importlib.reload(metadata)
+        assert metadata.OLLAMA_URL == "http://host.docker.internal:11434/api/chat"
+    finally:
+        monkeypatch.delenv("OLLAMA_URL", raising=False)
+        importlib.reload(metadata)  # вернуть дефолт для остальных тестов
+
+    assert metadata.OLLAMA_URL == "http://localhost:11434/api/chat"

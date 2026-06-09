@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import Counter
 from datetime import date
@@ -134,11 +135,13 @@ CROSSREF_TIMEOUT = 20.0
 #: Задаётся проектом; если None — запрос уходит без mailto.
 CROSSREF_MAILTO: str | None = None
 
-#: Эндпоинт локального сервера Ollama (chat API). Это localhost — работает offline.
-OLLAMA_URL = "http://localhost:11434/api/chat"
+#: Эндпоинт сервера Ollama (chat API). По умолчанию localhost (offline).
+#: Переопределяется переменной окружения OLLAMA_URL — например, в Docker:
+#: OLLAMA_URL=http://host.docker.internal:11434/api/chat
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
 
-#: Локальная модель для извлечения метаданных (см. README).
-OLLAMA_MODEL = "qwen2.5:3b"
+#: Локальная модель для извлечения метаданных (env OLLAMA_MODEL, см. README).
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
 
 #: Таймаут запроса к локальной LLM, секунды.
 LLM_TIMEOUT = 60.0
