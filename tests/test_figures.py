@@ -1,9 +1,6 @@
 """Юнит-тесты для модуля извлечения визуальных элементов."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from parser.figures import SpatialExtractor, VLMTableExtractor
 
@@ -13,7 +10,7 @@ class TestVLMTableExtractor:
 
     def test_extract_2d_array_file_not_found(self) -> None:
         """Граничный тест: файл изображения не существует.
-        
+
         Ожидаемое поведение: немедленный возврат пустого списка.
         """
         extractor = VLMTableExtractor()
@@ -25,7 +22,7 @@ class TestVLMTableExtractor:
         self, mock_chat: MagicMock, mock_exists: MagicMock
     ) -> None:
         """Юнит-тест: валидный ответ от мультимодальной нейросети.
-        
+
         Ожидаемое поведение: успешный парсинг 2D-массива.
         """
         mock_chat.return_value = {
@@ -43,7 +40,7 @@ class TestVLMTableExtractor:
         self, mock_chat: MagicMock, mock_exists: MagicMock
     ) -> None:
         """Граничный тест: защита от деструктуризации массива.
-        
+
         Ожидаемое поведение: плоский 1D-список оборачивается в 2D.
         """
         mock_chat.return_value = {
@@ -61,7 +58,7 @@ class TestVLMTableExtractor:
         self, mock_chat: MagicMock, mock_exists: MagicMock
     ) -> None:
         """Граничный тест: защита от нарушения типов (float вместо str).
-        
+
         Ожидаемое поведение: принудительный кастинг чисел в строки.
         """
         mock_chat.return_value = {
@@ -79,7 +76,7 @@ class TestVLMTableExtractor:
         self, mock_chat: MagicMock, mock_exists: MagicMock
     ) -> None:
         """Граничный тест: критический сбой локального сервера Ollama.
-        
+
         Ожидаемое поведение: перехват исключения и возврат пустого списка.
         """
         mock_chat.side_effect = Exception("502 Bad Gateway")
@@ -109,7 +106,7 @@ class TestSpatialExtractor:
         self, mock_fitz: MagicMock, mock_yolo: MagicMock, mock_hub: MagicMock
     ) -> None:
         """Граничный тест: обработка страницы без целевых объектов.
-        
+
         Ожидаемое поведение: возврат пустых списков фигур и таблиц.
         """
         mock_doc = MagicMock()
@@ -119,12 +116,12 @@ class TestSpatialExtractor:
         mock_fitz.return_value = mock_doc
 
         extractor = SpatialExtractor("test_dir")
-        
+
         mock_yolo_res = MagicMock()
         mock_yolo_res.boxes = []
         extractor.model.predict.return_value = [mock_yolo_res]
 
         figures, tables = extractor.extract_visuals("dummy.pdf")
-        
+
         assert len(figures) == 0
         assert len(tables) == 0
