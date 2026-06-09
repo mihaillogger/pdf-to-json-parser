@@ -14,7 +14,7 @@ from parser.extractor import get_page_blocks
 from parser.figures import SpatialExtractor
 from parser.metadata import extract_metadata
 from parser.schemas import BBox, Document, Equation, Figure, PageBlock, Table
-from parser.sections import build_section_tree
+from parser.sections import build_section_tree, extract_acknowledgments
 
 #: Обязательные поля (ТЗ 8.1): если какое-то пусто — статус «частичный успех».
 _REQUIRED_FIELDS = ("title", "authors", "abstract", "doi", "sections", "raw_text")
@@ -378,6 +378,10 @@ def process_single_file(
                 "Парсинг формул пропущен."
             )
 
+        # Вырезаем благодарности из дерева перед финальной сборкой
+        logger.debug("Извлечение секции Acknowledgments...")
+        ack_text = extract_acknowledgments(section_tree)
+
         # 6. Финальная Pydantic-сборка
         logger.debug("Сборка итогового объекта Document...")
         doc = Document(
@@ -386,7 +390,7 @@ def process_single_file(
             figures=figures_list,
             tables=tables_list,
             equations=equations_list,
-            acknowledgments=None,  # Можно дописать поиск внутри section_tree
+            acknowledgments=ack_text,
             raw_text=raw_text,
         )
 
