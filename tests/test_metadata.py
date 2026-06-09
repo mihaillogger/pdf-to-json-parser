@@ -327,7 +327,7 @@ def test_query_crossref_success(monkeypatch: Any) -> None:
     def fake_get(url: str, **kwargs: Any) -> _FakeResponse:
         return _FakeResponse({"status": "ok", "message": SAMPLE_CROSSREF_MESSAGE})
 
-    monkeypatch.setattr(metadata.httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "get", fake_get)
     message = metadata.query_crossref("10.1016/j.ces.2025.121219")
 
     assert message is not None
@@ -338,7 +338,7 @@ def test_query_crossref_network_error_returns_none(monkeypatch: Any) -> None:
     def fake_get(url: str, **kwargs: Any) -> _FakeResponse:
         raise httpx.ConnectError("no network")
 
-    monkeypatch.setattr(metadata.httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "get", fake_get)
     assert metadata.query_crossref("10.1016/j.ces.2025.121219") is None
 
 
@@ -369,7 +369,7 @@ def test_query_llm_success(monkeypatch: Any) -> None:
     def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
         return _fake_ollama(reply)
 
-    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "post", fake_post)
     result = metadata.query_llm("some page text")
 
     assert result == {
@@ -383,7 +383,7 @@ def test_query_llm_network_error_returns_none(monkeypatch: Any) -> None:
     def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
         raise httpx.ConnectError("ollama not running")
 
-    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "post", fake_post)
     assert metadata.query_llm("text") is None
 
 
@@ -391,7 +391,7 @@ def test_query_llm_invalid_json_returns_none(monkeypatch: Any) -> None:
     def fake_post(url: str, **kwargs: Any) -> _FakeResponse:
         return _fake_ollama("это не json, а просто текст")
 
-    monkeypatch.setattr(metadata.httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "post", fake_post)
     assert metadata.query_llm("text") is None
 
 

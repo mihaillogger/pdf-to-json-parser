@@ -22,7 +22,7 @@ except ImportError:
     PIX2TEX_AVAILABLE = False
 
 # Строгий импорт Pydantic-схемы (согласно архитектуре команды)
-from parser.schemas import Equation
+from parser.schemas import BBox, Equation
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +144,12 @@ class EquationExtractor:
 
                     eq_img = page_img.crop(crop_box)
 
-                    bbox_dict = {
-                        "left": round(crop_box[0] / zoom, 2),
-                        "top": round(crop_box[1] / zoom, 2),
-                        "right": round(crop_box[2] / zoom, 2),
-                        "bottom": round(crop_box[3] / zoom, 2),
-                    }
+                    bbox_obj = BBox(
+                        left=round(crop_box[0] / zoom, 2),
+                        top=round(crop_box[1] / zoom, 2),
+                        right=round(crop_box[2] / zoom, 2),
+                        bottom=round(crop_box[3] / zoom, 2),
+                    )
 
                     latex_code = ""
                     if self.math_ocr:
@@ -172,7 +172,7 @@ class EquationExtractor:
                         latex=latex_code,
                         context=None,  # Делегируется оркестратору (cli.py)
                         page=page_num + 1,
-                        bbox=bbox_dict,
+                        bbox=bbox_obj,
                     )
 
                     extracted_equations.append(equation_obj)

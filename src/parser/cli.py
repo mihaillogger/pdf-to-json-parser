@@ -7,12 +7,11 @@ import fitz  # Импортируем fitz сюда только ради отк
 import typer
 from loguru import logger
 
+from parser import pipeline
+
 warnings.filterwarnings("ignore")
 
 fitz.TOOLS.mupdf_display_errors(False)
-
-from parser import pipeline
-
 
 app = typer.Typer(
     help="Конвейер для парсинга научных PDF-статей в структурированный JSON.",
@@ -20,7 +19,7 @@ app = typer.Typer(
 )
 
 
-@app.command()
+@app.command()  # type: ignore[untyped-decorator]
 def process(
     input_path: Annotated[
         Path,

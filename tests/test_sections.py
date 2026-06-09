@@ -10,8 +10,8 @@ from parser.sections import (
 
 
 def _block(
-    text: str,
-    font_size: float = 12.0,
+    text: str | None,
+    font_size: float | None = 12.0,
     is_bold: bool = False,
     block_type: str = "text",
 ) -> PageBlock:
@@ -179,9 +179,30 @@ def test_build_section_tree_hierarchy() -> None:
 
 def test_extract_acknowledgments_root_level() -> None:
     sections = [
-        Section(heading="Introduction", level=1, content="Intro text"),
-        Section(heading="Acknowledgements", level=1, content="Thanks to mom and dad."),
-        Section(heading="Conclusion", level=1, content="End of paper."),
+        Section(
+            heading="Introduction",
+            level=1,
+            content="Intro text",
+            number=None,
+            status=None,
+            status_effective_from=None,
+        ),
+        Section(
+            heading="Acknowledgements",
+            level=1,
+            content="Thanks to mom and dad.",
+            number=None,
+            status=None,
+            status_effective_from=None,
+        ),
+        Section(
+            heading="Conclusion",
+            level=1,
+            content="End of paper.",
+            number=None,
+            status=None,
+            status_effective_from=None,
+        ),
     ]
 
     ack_text = extract_acknowledgments(sections)
@@ -198,9 +219,17 @@ def test_extract_acknowledgments_nested() -> None:
             heading="Conclusion",
             level=1,
             content="End.",
+            number=None,
+            status=None,
+            status_effective_from=None,
             subsections=[
                 Section(
-                    heading="Funding", level=2, content="Gazprom Neft paid for this."
+                    heading="Funding",
+                    level=2,
+                    content="Gazprom Neft paid for this.",
+                    number=None,
+                    status=None,
+                    status_effective_from=None,
                 )
             ],
         ),
@@ -215,7 +244,16 @@ def test_extract_acknowledgments_nested() -> None:
 
 
 def test_extract_acknowledgments_not_found() -> None:
-    sections = [Section(heading="Introduction", level=1, content="Intro text")]
+    sections = [
+        Section(
+            heading="Introduction",
+            level=1,
+            content="Intro text",
+            number=None,
+            status=None,
+            status_effective_from=None,
+        )
+    ]
 
     assert extract_acknowledgments(sections) is None
     assert len(sections) == 1
