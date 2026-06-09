@@ -108,7 +108,7 @@ def _analyze_heading(
     if len(text) < 4 or len(text) > 300:
         return False, 0, None
 
-    # Игнорируем блоки, состоящие только из цифр и единиц измерения (координаты, физ. величины)
+    # Игнорируем блоки, состоящие только из цифр и единиц измерения
     if re.fullmatch(
         r"[\d\s\.\,\-]+(?:mM|cm|mm|mV|mA|h|min|s|kΩ|µm)?", text, re.IGNORECASE
     ):
@@ -135,7 +135,7 @@ def _analyze_heading(
             if text.endswith(".") or (rest_text and rest_text[0].islower()):
                 return False, 0, None
 
-            # В заголовках редко бывает много запятых (защита от списков авторов/аффилиаций)
+            # В заголовках редко бывает много запятых
             if text.count(",") >= 2:
                 return False, 0, None
 
@@ -152,7 +152,6 @@ def _analyze_heading(
     # Эвристика H2+: шрифт жирный и не меньше базового
     elif is_bold and font_size >= base_font - 0.5:
         if not text.endswith(".") and len(text) < 100 and "\n" not in text:
-
             # Срезаем стартовые спецсимволы, чтобы проверить первую букву
             clean_start = re.sub(r"^[^a-zA-Z]+", "", text)
             is_lower_start = bool(clean_start and clean_start[0].islower())
@@ -233,7 +232,8 @@ def build_section_tree(blocks: list[PageBlock]) -> list[Section]:
                 if chunk_text.lower() == "references":
                     in_references = True
 
-                # Динамическое вычисление уровня вложенности на основе падения/роста размера шрифта
+                # Динамическое вычисление уровня вложенности
+                # на основе падения/роста размера шрифта
                 if number is None and stack and level >= 2:
                     current_parent_level = stack[-1].level
                     current_parent_font = level_fonts.get(current_parent_level, 0.0)
@@ -301,8 +301,8 @@ def extract_acknowledgments(sections: list[Section]) -> str | None:
             return ack_text if ack_text else None
 
         if section.subsections:
-            ack_text = extract_acknowledgments(section.subsections)
-            if ack_text:
-                return ack_text
+            sub_ack = extract_acknowledgments(section.subsections)
+            if sub_ack:
+                return sub_ack
 
     return None
