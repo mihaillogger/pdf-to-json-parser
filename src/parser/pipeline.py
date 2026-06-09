@@ -1,7 +1,10 @@
 import concurrent.futures
+import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 import fitz
 from loguru import logger
@@ -10,7 +13,7 @@ from parser.equations import EquationExtractor
 from parser.extractor import get_page_blocks
 from parser.figures import SpatialExtractor
 from parser.metadata import extract_metadata
-from parser.schemas import Document, Equation, Figure, PageBlock, Table
+from parser.schemas import BBox, Document, Equation, Figure, PageBlock, Table
 from parser.sections import build_section_tree
 
 #: Обязательные поля (ТЗ 8.1): если какое-то пусто — статус «частичный успех».
@@ -98,6 +101,138 @@ def _log_summary(summary: BatchSummary) -> None:
         f"среднее/документ={summary.avg_seconds:.1f}s"
     )
     logger.info("=" * 60)
+
+
+#: Подпись к визуальному элементу: "Figure 1.", "Fig. S2", "Scheme 3",
+#: "Table 4", а также рус. варианты ("Рис. 1", "Таблица 2", "Схема 1").
+_CAPTION_RE = re.compile(
+    r"^\s*(?P<label>figure|fig\.?|scheme|table|таблица|рисунок|рис\.?|схема)"
+    r"\s*(?P<num>S?\d+[a-z]?)",
+    re.IGNORECASE,
+)
+
+#: Канонизация метки подписи к виду из ТЗ (англ., с заглавной).
+_LABEL_CANON: dict[str, str] = {
+    "figure": "Figure",
+    "fig": "Figure",
+    "рис": "Figure",
+    "рисунок": "Figure",
+    "scheme": "Scheme",
+    "схема": "Scheme",
+    "table": "Table",
+    "таблица": "Table",
+}
+
+#: Метки, относящиеся к «фигурам» (всё, что детектор отдаёт как figure/image).
+_FIGURE_KINDS: frozenset[str] = frozenset({"Figure", "Scheme"})
+
+#: Максимальное расстояние (в точках PDF) между элементом и его подписью.
+_MAX_CAPTION_DISTANCE = 200.0
+
+
+class _Captionable(Protocol):
+    """Структурный протокол для Figure/Table: общие поля для матчинга подписи."""
+
+    id: str
+    caption: str
+    page: int
+    bbox: BBox
+
+
+@dataclass
+class _CaptionCandidate:
+    """Кандидат-подпись, найденный в текстовом слое."""
+
+    kind: str  # "Figure" | "Scheme" | "Table"
+    id: str  # напр. "Figure S1"
+    text: str
+    page: int
+    bbox: BBox
+    used: bool = False
+
+
+def _find_caption_candidates(blocks: list[PageBlock]) -> list[_CaptionCandidate]:
+    """Находит в текстовых блоках строки-подписи вида «Figure N. …»/«Table N. …»."""
+    candidates: list[_CaptionCandidate] = []
+    for b in blocks:
+        if b.block_type != "text" or not b.text:
+            continue
+        match = _CAPTION_RE.match(b.text)
+        if not match:
+            continue
+        kind = _LABEL_CANON.get(match.group("label").lower().rstrip("."))
+        if kind is None:
+            continue
+        num = match.group("num").upper()
+        candidates.append(
+            _CaptionCandidate(
+                kind=kind,
+                id=f"{kind} {num}",
+                text=b.text,
+                page=b.page_number,
+                bbox=b.bbox,
+            )
+        )
+    return candidates
+
+
+def _caption_distance(v: BBox, c: BBox) -> float:
+    """Близость подписи к элементу: вертикальный зазор + штраф за несовпадение по X.
+
+    Подпись обычно лежит прямо под фигурой или над таблицей и горизонтально
+    перекрывается с ней. Чем меньше значение — тем вероятнее, что это «своя» подпись.
+    """
+    h_overlap = min(v.right, c.right) - max(v.left, c.left)
+    h_penalty = 0.0 if h_overlap > 0 else -h_overlap
+
+    if c.top >= v.bottom:  # подпись ниже элемента
+        v_gap = c.top - v.bottom
+    elif c.bottom <= v.top:  # подпись выше элемента
+        v_gap = v.top - c.bottom
+    else:  # вертикально перекрываются
+        v_gap = 0.0
+
+    return v_gap + h_penalty
+
+
+def _assign_captions(
+    items: Sequence[_Captionable],
+    candidates: list[_CaptionCandidate],
+    kinds: frozenset[str],
+) -> None:
+    """Жадно привязывает к каждому элементу ближайшую неиспользованную подпись."""
+    for item in items:
+        best: _CaptionCandidate | None = None
+        best_dist = _MAX_CAPTION_DISTANCE
+        for cand in candidates:
+            if cand.used or cand.kind not in kinds or cand.page != item.page:
+                continue
+            dist = _caption_distance(item.bbox, cand.bbox)
+            if dist < best_dist:
+                best, best_dist = cand, dist
+        if best is not None:
+            best.used = True
+            item.id = best.id
+            item.caption = best.text
+
+
+def enrich_visual_captions(
+    figures: list[Figure], tables: list[Table], blocks: list[PageBlock]
+) -> None:
+    """Проставляет фигурам/таблицам реальные ``id``/``caption`` из текста (ТЗ 4.4/4.5).
+
+    Пространственный детектор отдаёт BBox и кропы, но не текст: объекты приходят
+    с пустым ``caption`` и дефолтным ``id`` ("Figure 1"). Здесь мы находим в
+    текстовом слое ближайшую подпись («Figure 2. …», «Table 1. …») и
+    перезаписываем поля реальными значениями. Если подпись не найдена —
+    дефолтные значения сохраняются.
+    """
+    candidates = _find_caption_candidates(blocks)
+    if not candidates:
+        return
+    # Фигуры и схемы матчим из «фигурного» пула, таблицы — из «табличного».
+    _assign_captions(figures, candidates, _FIGURE_KINDS)
+    _assign_captions(tables, candidates, frozenset({"Table"}))
 
 
 def enrich_equations_context(
@@ -218,6 +353,10 @@ def process_single_file(
 
             spatial = SpatialExtractor(output_img_dir=str(img_dir))
             figures_list, tables_list = spatial.extract_visuals(str(pdf_path))
+
+            # Подписи и id берём из текстового слоя (детектор их не парсит).
+            logger.debug("Сопоставление подписей фигур/таблиц с текстом...")
+            enrich_visual_captions(figures_list, tables_list, blocks)
 
         # 5. Уравнения (Твоя YOLOv8 + Pix2Tex)
         equations_list = []
