@@ -1,19 +1,22 @@
 import concurrent.futures
 from pathlib import Path
 
+import fitz
 from loguru import logger
 
 from parser.equations import EquationExtractor
 from parser.extractor import get_page_blocks
 from parser.figures import SpatialExtractor
 from parser.metadata import extract_metadata
-from parser.schemas import Document
+from parser.schemas import Document, Equation, Figure, PageBlock, Table
 from parser.sections import build_section_tree
 
 
-def enrich_equations_context(equations: list, blocks: list) -> None:
+def enrich_equations_context(
+    equations: list[Equation], blocks: list[PageBlock]
+) -> None:
     """
-    Обогащает уравнения контекстом. Сопоставляет Y-координаты 
+    Обогащает уравнения контекстом. Сопоставляет Y-координаты
     ограничивающих рамок (BBox) формул и текстовых блоков Матвея.
     """
     for eq in equations:
@@ -21,10 +24,13 @@ def enrich_equations_context(equations: list, blocks: list) -> None:
             continue
 
         page_blocks = [
-            b for b in blocks
-            if b.page_number == eq.page and getattr(b, "block_type", "text") == "text" and b.text
+            b
+            for b in blocks
+            if b.page_number == eq.page
+            and getattr(b, "block_type", "text") == "text"
+            and b.text
         ]
-        
+
         if not page_blocks:
             continue
 
@@ -34,11 +40,11 @@ def enrich_equations_context(equations: list, blocks: list) -> None:
         context_parts = []
         if above:
             nearest_above = max(above, key=lambda b: b.bbox.bottom)
-            context_parts.append(nearest_above.text.strip())
-        
+            context_parts.append((nearest_above.text or "").strip())
+
         if below:
             nearest_below = min(below, key=lambda b: b.bbox.top)
-            context_parts.append(nearest_below.text.strip())
+            context_parts.append((nearest_below.text or "").strip())
 
         if context_parts:
             eq.context = "\n[FORMULA PLACEHOLDER]\n".join(context_parts)
@@ -69,7 +75,8 @@ def process_single_file(
             logger.error(f"Файл {pdf_path.name} пуст или не содержит текста.")
             return
 
-        # Собираем сырой текст для поиска DOI и метаданных
+        # raw_text для JSON-поля (ТЗ 4.8): колоночный порядок из блоков — чище,
+        # без артефактов вёрстки.
         raw_text = "\n".join(
             [
                 b.text
@@ -78,11 +85,20 @@ def process_single_file(
             ]
         )
 
+        # Для поиска DOI/метаданных нужен ПОЛНЫЙ текст, включая колонтитулы:
+        # DOI самой статьи обычно напечатан в шапке/футере, которые extractor
+        # срезает из блоков (иначе find_doi не находит свой DOI или берёт чужой).
+        try:
+            with fitz.open(str(pdf_path)) as doc_full:
+                meta_text = "\n".join(page.get_text() for page in doc_full)
+        except Exception:
+            meta_text = raw_text
+
         # 2. Метаданные
         logger.debug("Извлечение метаданных...")
         meta = extract_metadata(
             blocks=blocks,
-            raw_text=raw_text,
+            raw_text=meta_text,
             use_crossref=use_crossref,
             use_llm=use_llm,
             offline=offline,
@@ -93,8 +109,8 @@ def process_single_file(
         section_tree = build_section_tree(blocks)
 
         # 4. Визуальные элементы: Фигуры и Таблицы
-        figures_list = []
-        tables_list = []
+        figures_list: list[Figure] = []
+        tables_list: list[Table] = []
         if extract_images:
             logger.debug("Запуск SpatialExtractor (YOLOv10 + LLaVA)...")
             img_dir = output_dir / "images" / pdf_path.stem
@@ -107,12 +123,12 @@ def process_single_file(
         equations_list = []
         project_root = Path(__file__).resolve().parent.parent.parent
         eq_weights = project_root / "weights" / "best.pt"
-        
+
         if eq_weights.exists():
             logger.debug("Запуск EquationExtractor...")
             eq_extractor = EquationExtractor(model_path=str(eq_weights))
             equations_list = eq_extractor.process_pdf(str(pdf_path))
-            
+
             # === СТРОГАЯ ИНТЕГРАЦИЯ КОНТЕКСТА ===
             logger.debug("Обогащение формул текстовым контекстом...")
             enrich_equations_context(equations_list, blocks)
