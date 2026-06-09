@@ -313,6 +313,6 @@ uv run python scripts/eval_pipeline.py --pred-dir out/ --gold evaluation/gold.js
 | --- | --- |
 | **Матвей Ильенков** | `extractor.py`: извлечение текста, обработка колонок, зонирование |
 | **Роман Корняков** | `sections.py`: дерево секций, Docker-инфраструктура, Web-интерфейс |
-| **Арсений Фёдоров** | `figures.py`, `equations.py`: детекция фигур/таблиц/уравнений |
+| **Арсений Фёдоров** | `figures.py`, `equations.py`: детекция фигур/таблиц/уравнений, метрики качества  |
 | **Михаил Позин** | `pipeline.py`, `cli.py`: архитектура пайплайна, CLI, интеграция CI/CD |
-| **Арсений Бобченок** | `metadata.py`, `ocr.py`, `evaluation.py`: каскад DOI/CrossRef/LLM, OCR-фоллбэк, метрики качества |
+| **Арсений Бобченок** | `metadata.py`, `ocr.py`, `evaluation.py`: каскад DOI/CrossRef/LLM, OCR-фоллбэк |
