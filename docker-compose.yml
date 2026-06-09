@@ -1,0 +1,17 @@
+services:
+  parser:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_URL=http://host.docker.internal:11434/api/chat
+      - OLLAMA_MODEL=qwen2.5:3b
+      - HF_HOME=/cache/hf
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./weights:/app/weights
+      - ./hf_cache:/cache/hf
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

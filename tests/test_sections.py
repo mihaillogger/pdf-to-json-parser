@@ -129,49 +129,52 @@ def test_build_section_tree_empty() -> None:
     assert build_section_tree([]) == []
 
 
-def test_build_section_tree_no_headings_creates_metadata_root() -> None:
+def test_build_section_tree_skips_metadata_garbage() -> None:
     blocks = [
-        _block("Just some text", font_size=10.0, is_bold=False),
-        _block("More plain text", font_size=10.0, is_bold=False),
+        _block("John Doe, ITMO University", font_size=10.0),  # Мусор
+        _block("Received: 10 May", font_size=10.0),  # Мусор
+        _block("1. Introduction", font_size=14.0, is_bold=True),
+        _block("Actual start of the paper.", font_size=12.0),
     ]
+
     tree = build_section_tree(blocks)
 
     assert len(tree) == 1
-    assert tree[0].heading == "Metadata/Abstract"
-    assert "Just some text\n\nMore plain text" in tree[0].content
+    assert tree[0].heading == "1. Introduction"
+    assert tree[0].content == "Actual start of the paper."
+    assert "John Doe" not in tree[0].content
 
 
 def test_build_section_tree_hierarchy() -> None:
     blocks = [
-        _block("Main Paper Title", font_size=18.0, is_bold=True),
-        _block("Abstract text goes here.", font_size=10.0),
-        _block("1. Introduction", font_size=12.0, is_bold=True),
+        _block("1. Introduction", font_size=14.0, is_bold=True),  # Станет level 2
         _block("Intro content.", font_size=10.0),
-        _block("1.1. Background", font_size=11.0, is_bold=True),
+        _block("1.1. Background", font_size=12.0, is_bold=True),  # Станет level 3
         _block("Background content.", font_size=10.0),
-        _block("2. Methods", font_size=12.0, is_bold=True),
+        _block("2. Methods", font_size=14.0, is_bold=True),  # Станет level 2
         _block("Methods content.", font_size=10.0),
     ]
+
     tree = build_section_tree(blocks)
 
-    assert len(tree) == 3
+    # У нас должно быть 2 корневые секции (на 2-м уровне)
+    assert len(tree) == 2
 
-    # H1
-    assert tree[0].heading == "Main Paper Title"
-    assert tree[0].content == "Abstract text goes here."
+    # Первая секция (1. Introduction)
+    assert tree[0].heading == "1. Introduction"
+    assert tree[0].level == 2
+    assert tree[0].content == "Intro content."
+    assert len(tree[0].subsections) == 1
 
-    # H2 (1. Introduction)
-    assert tree[1].heading == "1. Introduction"
-    assert tree[1].content == "Intro content."
-    assert len(tree[1].subsections) == 1
+    # Подсекция внутри первой (1.1. Background)
+    assert tree[0].subsections[0].heading == "1.1. Background"
+    assert tree[0].subsections[0].level == 3
+    assert tree[0].subsections[0].content == "Background content."
 
-    # H3 (1.1. Background) внутри H2
-    assert tree[1].subsections[0].heading == "1.1. Background"
-    assert tree[1].subsections[0].content == "Background content."
-
-    # H2 (2. Methods)
-    assert tree[2].heading == "2. Methods"
-    assert tree[2].content == "Methods content."
+    # Вторая секция (2. Methods)
+    assert tree[1].heading == "2. Methods"
+    assert tree[1].level == 2
+    assert tree[1].content == "Methods content."
 
 
 # Тесты для extract_acknowledgments
