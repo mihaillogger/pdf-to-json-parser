@@ -45,6 +45,8 @@ def _predict(pdf_path: str, flags: dict[str, bool]) -> dict[str, Any]:
         "doi": meta.doi,
         "year": meta.year,
         "journal": meta.journal,
+        "abstract": meta.abstract,
+        "keywords": meta.keywords,
     }
 
 
