@@ -1,6 +1,5 @@
 """Юнит-тесты для модуля извлечения уравнений."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -50,16 +49,24 @@ class TestEquationExtractor:
 
     @patch("parser.equations.YOLO")
     @patch("parser.equations.fitz.open")
-    def test_process_pdf_empty_boxes(self, mock_fitz, mock_yolo, mock_yolo_weights):
+    @patch("parser.equations.Image.open")
+    def test_process_pdf_empty_boxes(
+        self, mock_image_open, mock_fitz, mock_yolo, mock_yolo_weights
+    ):
         """Граничный тест: YOLO не нашла ни одной формулы."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
         mock_doc.__len__.return_value = 1
         mock_doc.__getitem__.return_value = mock_page
+
+        mock_pixmap = MagicMock()
+        mock_pixmap.tobytes.return_value = b"fake_bytes"
+        mock_page.get_pixmap.return_value = mock_pixmap
+
         mock_fitz.return_value.__enter__.return_value = mock_doc
 
         extractor = EquationExtractor(mock_yolo_weights)
-        
+
         mock_yolo_res = MagicMock()
         mock_yolo_res.boxes = []
         extractor.model.predict.return_value = [mock_yolo_res]
