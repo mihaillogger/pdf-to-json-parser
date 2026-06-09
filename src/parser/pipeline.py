@@ -1,6 +1,7 @@
 import concurrent.futures
 from pathlib import Path
 
+import fitz
 from loguru import logger
 
 from parser.equations import EquationExtractor
@@ -74,7 +75,8 @@ def process_single_file(
             logger.error(f"Файл {pdf_path.name} пуст или не содержит текста.")
             return
 
-        # Собираем сырой текст для поиска DOI и метаданных
+        # raw_text для JSON-поля (ТЗ 4.8): колоночный порядок из блоков — чище,
+        # без артефактов вёрстки.
         raw_text = "\n".join(
             [
                 b.text
@@ -83,11 +85,20 @@ def process_single_file(
             ]
         )
 
+        # Для поиска DOI/метаданных нужен ПОЛНЫЙ текст, включая колонтитулы:
+        # DOI самой статьи обычно напечатан в шапке/футере, которые extractor
+        # срезает из блоков (иначе find_doi не находит свой DOI или берёт чужой).
+        try:
+            with fitz.open(str(pdf_path)) as doc_full:
+                meta_text = "\n".join(page.get_text() for page in doc_full)
+        except Exception:
+            meta_text = raw_text
+
         # 2. Метаданные
         logger.debug("Извлечение метаданных...")
         meta = extract_metadata(
             blocks=blocks,
-            raw_text=raw_text,
+            raw_text=meta_text,
             use_crossref=use_crossref,
             use_llm=use_llm,
             offline=offline,
