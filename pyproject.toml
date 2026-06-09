@@ -3,7 +3,7 @@ name = "parser"
 version = "0.1.0"
 description = "PDF parser for scientific papers to structured JSON"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 
 dependencies = [
     "pydantic>=2.5.0",
