@@ -35,6 +35,23 @@ PDF-статей (химия) в строгий машиночитаемый **J
 
 ## 🏗 Архитектура
 
+Модульная: каждый слой тестируется независимо. Оркестратор собирает результаты
+в объект `Document` (Pydantic) и сериализует в JSON.
+
+```
+                        ┌──────────────┐
+   PDF ──▶ cli.py ──▶   │ pipeline.py  │ ──▶ Document(JSON) + images/ + run.log
+                        │ (оркестратор)│
+                        └──────┬───────┘
+          ┌──────────────┬─────┼───────────┬───────────────┐
+          ▼              ▼     ▼            ▼               ▼
+     extractor.py   metadata.py  sections.py  figures.py  equations.py
+     (текст,        (DOI→CrossRef (дерево     (YOLO+VLM   (YOLO+Pix2Tex
+      колонки;       →LLM→эвр.)    секций)     таблицы)    →LaTeX)
+      OCR-фоллбэк)
+                        └──────────── schemas.py (единый стандарт JSON) ───────┘
+```
+
 | Файл | Назначение |
 | --- | --- |
 | `src/parser/cli.py` | CLI на Typer: аргументы, режимы, логирование |
@@ -120,11 +137,15 @@ uv sync          # поднимет .venv и поставит зависимос
 ### Запуск CLI
 
 ```bash
-# одиночный файл
+# одиночный файл (сценарий А)
 uv run python -m parser --input article.pdf --output out/
 
-# целая директория, 4 параллельных воркера
+# целая директория, 4 параллельных воркера (сценарий Б)
 uv run python -m parser --input ./pdfs --output out/ --workers 4
+
+# быстрый автономный прогон без сети и тяжёлых нейросетей
+uv run python -m parser --input ./pdfs --output out/ \
+    --workers 4 --offline --no-llm --no-extract-images
 ```
 
 ### Основные флаги
@@ -136,7 +157,7 @@ uv run python -m parser --input ./pdfs --output out/ --workers 4
 | `--workers` | `1` | Число параллельных процессов для батча |
 | `--overwrite` | off | Перезаписывать уже существующие JSON |
 | `--log-level` | `INFO` | Уровень логов (`INFO` / `DEBUG`) |
-| `--extract-images` | on | Извлекать фигуры/таблицы (YOLO + VLM) |
+| `--extract-images / --no-extract-images` | on | Извлекать фигуры/таблицы (YOLO + VLM) или пропустить их |
 | `--offline` | off | Не обращаться к внешним сервисам (CrossRef); локальная LLM остаётся доступной |
 | `--crossref / --no-crossref` | on | Использовать CrossRef API для метаданных |
 | `--llm / --no-llm` | on | Использовать локальную LLM (Ollama) |
