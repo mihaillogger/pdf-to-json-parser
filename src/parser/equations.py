@@ -111,7 +111,6 @@ class EquationExtractor:
 
         logger.info("Старт нейро-парсинга уравнений: %s", pdf_path)
 
-        # Используем менеджер контекста для безопасной работы с файлом
         with fitz.open(pdf_path) as doc:
             for page_num in range(len(doc)):
                 page = doc[page_num]
@@ -121,7 +120,7 @@ class EquationExtractor:
                 page_img = Image.open(io.BytesIO(img_data))
 
                 yolo_res = self.model.predict(
-                    page_img, imgsz=1024, conf=0.5, verbose=False
+                    page_img, conf=0.15, iou=0.4, verbose=False
                 )
                 boxes = yolo_res[0].boxes
 
@@ -161,7 +160,6 @@ class EquationExtractor:
                                 "Ошибка Pix2Tex на странице %d: %s", page_num + 1, e
                             )
 
-                    # Пропускаем пустые боксы, если распознавание провалилось
                     if not latex_code and PIX2TEX_AVAILABLE:
                         continue
 
@@ -170,7 +168,7 @@ class EquationExtractor:
                     equation_obj = Equation(
                         id=eq_id,
                         latex=latex_code,
-                        context=None,  # Делегируется оркестратору (cli.py)
+                        context=None,
                         page=page_num + 1,
                         bbox=bbox_dict,
                     )
